@@ -18,12 +18,18 @@ const nextConfig: NextConfig = {
       const trimmed = rawHost.trim();
       if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
         targetBackend = trimmed.replace(/\/$/, "");
+      } else if (trimmed.includes(".onrender.com")) {
+        targetBackend = `https://${trimmed}`;
+      } else if (trimmed.includes("javis-backend")) {
+        targetBackend = `https://javis-backend-3pfy.onrender.com`;
       } else if (trimmed.includes(":")) {
         targetBackend = `http://${trimmed}`;
       } else {
-        // Render internal private network hostname (e.g. javis-backend-3pfy)
-        targetBackend = `http://${trimmed}:${backendPort}`;
+        // Fallback for Render or custom container
+        targetBackend = `https://javis-backend-3pfy.onrender.com`;
       }
+    } else if (process.env.NODE_ENV === "production") {
+      targetBackend = "https://javis-backend-3pfy.onrender.com";
     }
 
     return [

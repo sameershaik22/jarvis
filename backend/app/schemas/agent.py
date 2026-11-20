@@ -63,6 +63,9 @@ class AgentStatusResponse(BaseModel):
     agent_state: Literal["idle", "running", "paused", "stopping", "error"]
     browser_active: bool
     browser_status: str = Field(default="Browser disconnected")
+    bridge_connected: bool = Field(default=False)
+    device_name: str | None = Field(default=None)
+    agency_id: str = Field(default="default")
     linkedin_authenticated: bool = Field(default=False)
     youtube_authenticated: bool = Field(default=False)
     current_url: str | None = None

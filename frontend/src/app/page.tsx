@@ -8,6 +8,8 @@ import {
   ExternalLink,
   FileSpreadsheet,
   Globe,
+  Info,
+  Laptop,
   Mail,
   Mic,
   Pause,
@@ -17,6 +19,7 @@ import {
   Square,
   Terminal,
   UserCheck,
+  X,
 } from "lucide-react";
 import { API_BASE, apiFetch } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -41,6 +44,9 @@ interface AgentStatus {
   agent_state: string;
   browser_active: boolean;
   browser_status?: string;
+  bridge_connected?: boolean;
+  device_name?: string | null;
+  agency_id?: string;
   linkedin_authenticated?: boolean;
   youtube_authenticated?: boolean;
   current_url: string | null;
@@ -85,7 +91,15 @@ interface AgentStatus {
   };
 }
 
-function renderBrowserBadge(status?: string, isActive?: boolean) {
+function renderBrowserBadge(status?: string, isActive?: boolean, bridgeConnected?: boolean, deviceName?: string | null) {
+  if (bridgeConnected) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-950/90 text-emerald-400 border border-emerald-700/60 shadow-sm">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        Local Chrome Connected ({deviceName || "Desktop"})
+      </span>
+    );
+  }
   const norm = (status || "").toLowerCase().trim();
   if (norm === "research in progress") {
     return (
@@ -119,18 +133,18 @@ function renderBrowserBadge(status?: string, isActive?: boolean) {
       </span>
     );
   }
-  if (isActive || norm === "browser launched") {
+  if (isActive || norm === "browser launched" || norm.includes("cloud chromium")) {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-cyan-950/90 text-cyan-300 border border-cyan-700/60 shadow-sm">
         <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-        Chrome Connected (CDP :9222)
+        {norm.includes("cloud") ? "Cloud Chromium Standby" : "Chrome Connected (CDP :9222)"}
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-900 text-slate-400 border border-slate-700">
       <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-      Chrome Standby
+      Local Agent Offline (Run start_agent.bat)
     </span>
   );
 }
@@ -148,6 +162,7 @@ export default function AgentWorkspacePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shotTick, setShotTick] = useState(0);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
 
   const inFlightRef = useRef(false);
   const lastShotRef = useRef(0);
@@ -368,8 +383,16 @@ export default function AgentWorkspacePage() {
             <div className="text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
               <Globe className="w-3.5 h-3.5 text-cyan-400" /> Active Chrome Browser (Desktop CDP)
             </div>
-            <div>
-              {renderBrowserBadge(status?.browser_status, status?.browser_active)}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSetupGuide((v) => !v)}
+                className="text-[11px] px-2.5 py-1 rounded border border-cyan-800/70 bg-cyan-950/50 text-cyan-300 hover:bg-cyan-900/60 cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                <Laptop className="w-3.5 h-3.5" />
+                {status?.bridge_connected ? "Bridge Settings" : "Connect Local PC"}
+              </button>
+              {renderBrowserBadge(status?.browser_status, status?.browser_active, status?.bridge_connected, status?.device_name)}
             </div>
           </div>
 
@@ -383,12 +406,82 @@ export default function AgentWorkspacePage() {
             <div>
               Active Website: <span className="text-slate-200 font-medium">{status?.current_website || "—"}</span>
             </div>
-            <div className="text-[11px] text-slate-400">
-              Desktop Chrome: <code className="text-cyan-300 font-mono">127.0.0.1:9222</code>
+            <div className="text-[11px] text-slate-400 flex items-center gap-3">
+              <span>Workspace: <strong className="text-cyan-300 font-mono">{status?.agency_id || "default"}</strong></span>
+              <span>Desktop Chrome: <code className="text-cyan-300 font-mono">127.0.0.1:9222</code></span>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Multi-User Local Desktop Agent Setup Modal */}
+      {showSetupGuide && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-xl w-full p-6 shadow-2xl relative space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <Laptop className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-base font-semibold text-white">Connect Your Desktop Chrome</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSetupGuide(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              YoursBuddy AI runs in multi-user mode. Anyone on the team can connect their own Windows computer to control their local Google Chrome browser from the cloud without exposing port 9222 publicly.
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 flex items-start gap-3">
+                <span className="w-5 h-5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/80 flex items-center justify-center font-bold shrink-0">1</span>
+                <div>
+                  <div className="font-semibold text-slate-200">Start Desktop Chrome</div>
+                  <div className="text-slate-400 mt-0.5">Double click <code className="text-cyan-300 font-mono">start_agent.bat</code> in the project folder, or run:</div>
+                  <pre className="mt-1.5 p-2 bg-slate-900 rounded border border-slate-800 font-mono text-cyan-200 text-[11px] select-all overflow-x-auto">
+                    chrome.exe --remote-debugging-port=9222 --user-data-dir=&quot;%LOCALAPPDATA%\Google\Chrome\AutomationData&quot;
+                  </pre>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 flex items-start gap-3">
+                <span className="w-5 h-5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/80 flex items-center justify-center font-bold shrink-0">2</span>
+                <div>
+                  <div className="font-semibold text-slate-200">Launch Bridge Agent</div>
+                  <div className="text-slate-400 mt-0.5">The script initiates an outbound secure connection to Render for your workspace:</div>
+                  <pre className="mt-1.5 p-2 bg-slate-900 rounded border border-slate-800 font-mono text-cyan-200 text-[11px] select-all overflow-x-auto">
+                    {`python scripts\\local_agent.py --agency-id ${status?.agency_id || "default"}`}
+                  </pre>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 flex items-start gap-3">
+                <span className="w-5 h-5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800/80 flex items-center justify-center font-bold shrink-0">3</span>
+                <div>
+                  <div className="font-semibold text-slate-200">Autonomous Research Ready</div>
+                  <div className="text-slate-400 mt-0.5">
+                    Your badge will turn green (<strong className="text-emerald-400">Local Chrome Connected</strong>). Clicking &quot;Start Research&quot; will now operate your local browser window in real-time.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowSetupGuide(false)}
+                className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium cursor-pointer transition-all"
+              >
+                Got It
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Split: Jarvis Console + Live Browser Viewer / Activity Log */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

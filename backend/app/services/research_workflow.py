@@ -13,6 +13,7 @@ from app.db.models import AgentActivityLog, AgentMessage, ResearchTask
 from app.db.session import SessionLocal
 from app.services.ai_planner import ai_planner
 from app.services.browser_controller import BrowserController, browser_controller
+from app.services.browser_manager import browser_manager
 from app.services.company_researcher import research_host_company
 from app.services.contact_discovery import discover_host_contacts
 from app.services.host_identifier import identify_podcast_host
@@ -308,10 +309,12 @@ class ResearchWorkflowManager:
         audio_accessible: bool = False,
         allow_live_browser: bool = True,
         agency_id: str = "default",
+        browser: Any = None,
     ) -> dict[str, Any]:
         """Execute Modules 3 -> 8 for a single discovered podcast post."""
         if self._stop_requested:
             return {"status": "Stopped", "is_new": False}
+        active_b = browser or self.browser
         post, is_new = upsert_linkedin_post(db, task_id, post_data, agency_id=agency_id)
         add_evidence(
             db,
@@ -328,12 +331,12 @@ class ResearchWorkflowManager:
         frames = frame_paths or []
         v_meta = video_meta or {"found": bool(post.video_url)}
         if allow_live_browser and not frames and post.post_url:
-            nav = await self.browser.open_url(post.post_url, screenshot_label=f"post_{post.id}")
+            nav = await active_b.open_url(post.post_url, screenshot_label=f"post_{post.id}")
             if nav.success and (not nav.gate or not nav.gate.restricted):
-                cap = await self.browser.capture_video_frames(max_frames=2)
-                frames = cap["frame_paths"]
-                v_meta = cap["video_meta"]
-                audio_accessible = cap["audio_accessible"]
+                cap = await active_b.capture_video_frames(max_frames=2)
+                frames = cap.get("frame_paths", [])
+                v_meta = cap.get("video_meta", {})
+                audio_accessible = cap.get("audio_accessible", False)
 
         qa_res = await assess_podcast_video(
             caption=post.post_caption,
@@ -373,7 +376,7 @@ class ResearchWorkflowManager:
         orig_res = await find_original_podcast(
             post_data=post_data,
             ai_entities=ai_entities,
-            browser=self.browser if allow_live_browser else None,
+            browser=active_b if allow_live_browser else None,
             allow_live_search=allow_live_browser,
         )
 
@@ -382,7 +385,7 @@ class ResearchWorkflowManager:
             post_data=post_data,
             podcast_name=orig_res.podcast_name,
             ai_entities=ai_entities,
-            browser=self.browser if allow_live_browser else None,
+            browser=active_b if allow_live_browser else None,
         )
 
         # Module 6 — Host Company Research (no guest/marketing employee prospecting)
@@ -391,7 +394,7 @@ class ResearchWorkflowManager:
             host_linkedin_url=host_res.host_linkedin_url,
             initial_company_name=host_res.associated_company,
             post_external_urls=post_data.get("external_urls"),
-            browser=self.browser if allow_live_browser else None,
+            browser=active_b if allow_live_browser else None,
             allow_live_browser=allow_live_browser,
         )
 
@@ -403,7 +406,7 @@ class ResearchWorkflowManager:
             company_name=comp_res.company_name,
             official_website=comp_res.official_website,
             youtube_channel_url=orig_res.youtube_channel_url,
-            browser=self.browser if allow_live_browser else None,
+            browser=active_b if allow_live_browser else None,
             allow_live_browser=allow_live_browser,
         )
 
@@ -539,7 +542,9 @@ class ResearchWorkflowManager:
             await self._log(task_id, "browser_init", "start", f"Starting browser research for '{keyword}'.", progress=5)
 
             if use_browser:
-                info = await self.browser.start()
+                agency_session = browser_manager.get_session(agency_id)
+                active_browser = agency_session if agency_session.is_local_connected else self.browser
+                info = await active_browser.start()
                 await self._log(
                     task_id,
                     "browser_ready",
@@ -582,11 +587,11 @@ class ResearchWorkflowManager:
                         progress=min(95, 20 + (cycle % 12) * 5),
                     )
                     try:
-                        yt_nav = await self.browser.open_url(yt_search_url, screenshot_label=f"yt_search_{cycle}")
+                        yt_nav = await active_browser.open_url(yt_search_url, screenshot_label=f"yt_search_{cycle}")
                         if yt_nav.success:
-                            await self.browser.scroll("down", 1000)
+                            await active_browser.scroll("down", 1000)
                             await asyncio.sleep(1)
-                            yt_html = await self.browser.get_html()
+                            yt_html = await active_browser.get_html()
                             yt_results = parse_youtube_search_results_from_html(yt_html)
                             for y in yt_results:
                                 candidate_url = y.get("video_url") or y.get("channel_url")
@@ -622,7 +627,7 @@ class ResearchWorkflowManager:
                         progress=min(95, 22 + (cycle % 12) * 5),
                     )
                     try:
-                        li_nav = await self.browser.open_url(li_search_url, screenshot_label=f"li_search_{cycle}")
+                        li_nav = await active_browser.open_url(li_search_url, screenshot_label=f"li_search_{cycle}")
                         if li_nav.gate and li_nav.gate.restricted:
                             await self._log(
                                 task_id,
@@ -637,13 +642,13 @@ class ResearchWorkflowManager:
                             for scroll_idx in range(2):
                                 if self._stop_requested or not await self._wait_if_paused(task_id):
                                     break
-                                html = await self.browser.get_html()
+                                html = await active_browser.get_html()
                                 parsed = parse_linkedin_posts_from_html(html, keyword=current_kw)
                                 for item in parsed:
                                     if item["post_url"] not in seen_urls:
                                         seen_urls.add(item["post_url"])
                                         batch_candidates.append(item)
-                                await self.browser.scroll("down", 800)
+                                await active_browser.scroll("down", 800)
                     except Exception as li_err:
                         logger.warning("LinkedIn search step encountered error: %s", li_err)
 
@@ -712,6 +717,7 @@ class ResearchWorkflowManager:
                                 quality_threshold=threshold,
                                 allow_live_browser=True,
                                 agency_id=agency_id,
+                                browser=active_browser,
                             )
                             lead_name = res.get("host_name") or channel_name
                             lead_email = res.get("email") or "Searching..."
@@ -739,7 +745,7 @@ class ResearchWorkflowManager:
 
                     # Clean up any extra background tabs opened during research to free RAM and CPU
                     try:
-                        await self.browser.cleanup_stray_tabs()
+                        await active_browser.cleanup_stray_tabs()
                     except Exception:
                         pass
 

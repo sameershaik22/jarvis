@@ -21,6 +21,7 @@ from app.schemas.agent import (
     AgentTaskSummary,
 )
 from app.services.browser_controller import browser_controller
+from app.services.browser_manager import browser_manager
 from app.services.chat_command import handle_jarvis_command
 from app.services.research_workflow import workflow_manager
 
@@ -76,13 +77,10 @@ async def stop_research() -> dict[str, bool]:
     return {"stopped": await workflow_manager.stop_task()}
 
 
-# High-performance in-memory cache to prevent Neon PostgreSQL saturation during polling
-_cached_stats: dict[str, Any] = {}
-_cached_stats_time: float = 0.0
-_cached_leads: list[Any] = []
-_cached_leads_time: float = 0.0
-_cached_status_response: AgentStatusResponse | None = None
-_cached_status_time: float = 0.0
+# High-performance in-memory cache partitioned per tenant/workspace
+_cached_stats: dict[str, tuple[float, dict[str, Any]]] = {}
+_cached_leads: dict[str, tuple[float, list[Any]]] = {}
+_cached_status_responses: dict[str, tuple[float, AgentStatusResponse]] = {}
 
 
 @router.get("/status", response_model=AgentStatusResponse)
@@ -90,18 +88,18 @@ async def get_agent_status(
     agency_id: str = Depends(get_agency_id),
     db: Session = Depends(get_db),
 ) -> AgentStatusResponse:
-    global _cached_stats, _cached_stats_time, _cached_leads, _cached_leads_time, _cached_status_response, _cached_status_time
+    global _cached_stats, _cached_leads, _cached_status_responses
     now = time.time()
 
     # Fast-path cache return (0.1ms response time, completely removes frontend polling lag)
-    if _cached_status_response is not None and (now - _cached_status_time) < 5.0:
-        _cached_status_response.agent_state = workflow_manager.agent_state  # type: ignore[assignment]
-        _cached_status_response.browser_active = browser_controller.is_active
-        cur_u = browser_controller.current_url or _cached_status_response.current_url
-        if cur_u:
-            _cached_status_response.current_url = cur_u
-            _cached_status_response.current_website = urlparse(cur_u).netloc
-        return _cached_status_response
+    cached_entry = _cached_status_responses.get(agency_id)
+    if cached_entry and (now - cached_entry[0]) < 3.0:
+        cached_resp = cached_entry[1]
+        cached_resp.agent_state = workflow_manager.agent_state  # type: ignore[assignment]
+        session = browser_manager.get_session(agency_id)
+        cached_resp.bridge_connected = session.is_local_connected
+        cached_resp.device_name = session.device_name if session.is_local_connected else None
+        return cached_resp
 
     active_task = None
     logs = []
@@ -136,33 +134,53 @@ async def get_agent_status(
             .all()
         )
     except Exception as db_exc:
-        if _cached_status_response:
-            return _cached_status_response
-    cur_url = browser_controller.current_url or (active_task.current_url if active_task else None)
-    cur_site = urlparse(cur_url).netloc if cur_url else None
-    status_info = await browser_controller.compute_browser_status()
-    shot = await browser_controller.get_live_screenshot()
-    shot_url = "/api/v1/agent/screenshot" if shot and Path(shot).exists() else None
+        if cached_entry:
+            return cached_entry[1]
 
-    # Cached Neon PostgreSQL queries (refreshed at most once every 3.5s to eliminate query lag)
+    session = browser_manager.get_session(agency_id)
+    if session.is_local_connected:
+        status_info = await session.compute_browser_status()
+        cur_url = session.current_url or (active_task.current_url if active_task else None)
+        browser_active = True
+        shot = session.last_screenshot_path
+    else:
+        status_info = await browser_controller.compute_browser_status()
+        cur_url = browser_controller.current_url or (active_task.current_url if active_task else None)
+        browser_active = browser_controller.is_active
+        shot = await browser_controller.get_live_screenshot()
+
+    cur_site = urlparse(cur_url).netloc if cur_url else None
+    shot_url = f"/api/v1/agent/screenshot?agency_id={agency_id}" if shot and Path(shot).exists() else None
+
+    # Cached Neon PostgreSQL queries per workspace
     from app.services.research_query import compute_dashboard_statistics, query_research_leads
-    if now - _cached_stats_time > 3.5 or not _cached_stats:
+    cached_s = _cached_stats.get(agency_id)
+    if not cached_s or (now - cached_s[0]) > 3.5:
         try:
-            _cached_stats = compute_dashboard_statistics(db, agency_id=agency_id)
-            _cached_stats_time = now
+            stats_val = compute_dashboard_statistics(db, agency_id=agency_id)
+            _cached_stats[agency_id] = (now, stats_val)
         except Exception:
-            pass
-    if now - _cached_leads_time > 3.5 or not _cached_leads:
+            stats_val = cached_s[1] if cached_s else {}
+    else:
+        stats_val = cached_s[1]
+
+    cached_l = _cached_leads.get(agency_id)
+    if not cached_l or (now - cached_l[0]) > 3.5:
         try:
-            _cached_leads = query_research_leads(db=db, agency_id=agency_id)[:10]
-            _cached_leads_time = now
+            leads_val = query_research_leads(db=db, agency_id=agency_id)[:10]
+            _cached_leads[agency_id] = (now, leads_val)
         except Exception:
-            pass
+            leads_val = cached_l[1] if cached_l else []
+    else:
+        leads_val = cached_l[1]
 
     resp = AgentStatusResponse(
         agent_state=workflow_manager.agent_state,  # type: ignore[arg-type]
-        browser_active=browser_controller.is_active,
+        browser_active=browser_active,
         browser_status=status_info["browser_status"],
+        bridge_connected=session.is_local_connected,
+        device_name=session.device_name if session.is_local_connected else None,
+        agency_id=agency_id,
         linkedin_authenticated=status_info["linkedin_authenticated"],
         youtube_authenticated=status_info["youtube_authenticated"],
         current_url=cur_url,
@@ -171,31 +189,45 @@ async def get_agent_status(
         active_task=_task_to_summary(active_task) if active_task else None,
         recent_logs=list(reversed(logs)),
         messages=messages,
-        recent_leads=_cached_leads,
-        stats=_cached_stats,
+        recent_leads=leads_val,
+        stats=stats_val,
     )
-    _cached_status_response = resp
-    _cached_status_time = time.time()
+    _cached_status_responses[agency_id] = (time.time(), resp)
     return resp
 
 
 @router.post("/browser/launch")
-async def launch_external_browser(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Launch visible external Chrome window on desktop."""
+async def launch_external_browser(
+    payload: dict[str, Any] | None = None,
+    agency_id: str = Depends(get_agency_id),
+) -> dict[str, Any]:
+    """Launch visible external Chrome window on desktop or local agent."""
     target = (payload or {}).get("target", "linkedin")
+    session = browser_manager.get_session(agency_id)
+    if session.is_local_connected:
+        return await session.launch_external_browser(target=target)
     return await browser_controller.launch_external_browser(target=target)
 
 
 @router.post("/browser/close")
-async def close_external_browser() -> dict[str, Any]:
+async def close_external_browser(agency_id: str = Depends(get_agency_id)) -> dict[str, Any]:
     """Close external Chrome window."""
+    session = browser_manager.get_session(agency_id)
+    if session.is_local_connected:
+        return await session.close_external_browser()
     return await browser_controller.close_external_browser()
 
 
 @router.post("/browser/reconnect")
-async def reconnect_external_browser(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+async def reconnect_external_browser(
+    payload: dict[str, Any] | None = None,
+    agency_id: str = Depends(get_agency_id),
+) -> dict[str, Any]:
     """Close and cleanly restart external Chrome window."""
     target = (payload or {}).get("target", "linkedin")
+    session = browser_manager.get_session(agency_id)
+    if session.is_local_connected:
+        return await session.reconnect_external_browser(target=target)
     return await browser_controller.reconnect_external_browser(target=target)
 
 
@@ -210,8 +242,9 @@ async def send_command(
 
 
 @router.get("/screenshot")
-def get_latest_screenshot() -> FileResponse:
-    shot = browser_controller.last_screenshot_path
+def get_latest_screenshot(agency_id: str = Depends(get_agency_id)) -> FileResponse:
+    session = browser_manager.get_session(agency_id)
+    shot = session.last_screenshot_path or browser_controller.last_screenshot_path
     if not shot or not Path(shot).exists():
         raise HTTPException(status_code=404, detail="No browser screenshot captured yet.")
     return FileResponse(path=shot, media_type="image/png", filename=Path(shot).name)

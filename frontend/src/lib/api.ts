@@ -1,35 +1,56 @@
 /**
  * Resolves the base API URL.
- * - In the browser, always use a relative URL ("") so calls route through Next.js rewrite proxies,
- *   preventing broken internal hostnames (e.g. javis-backend-3pfy) and CORS/SSL mismatches.
- * - On the server side, allow an absolute URL if configured.
+ * - In the browser:
+ *   - If NEXT_PUBLIC_BACKEND_URL starts with http(s), use it.
+ *   - If running on Render (e.g. javis-frontend.onrender.com), point directly to the public backend
+ *     https://javis-backend-3pfy.onrender.com to avoid private network lookup failures on Render Free tier.
+ *   - In local development, return "" to use Next.js rewrites proxying to localhost:8000.
  */
 function resolveApiBase(): string {
   const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL?.trim();
   if (typeof window !== "undefined") {
-    // If a full public HTTP(S) URL is explicitly provided, use it.
-    // If it's an internal container hostname (e.g. javis-backend-3pfy) or omitted,
-    // route through same-origin Next.js rewrites ("") so the browser doesn't 404.
     if (envUrl && (envUrl.startsWith("http://") || envUrl.startsWith("https://"))) {
       return envUrl.replace(/\/$/, "");
     }
+    if (window.location.hostname.includes("onrender.com")) {
+      return "https://javis-backend-3pfy.onrender.com";
+    }
     return "";
   }
-  if (!envUrl) return "";
+  if (!envUrl) return "http://127.0.0.1:8000";
   if (envUrl.startsWith("http://") || envUrl.startsWith("https://")) {
     return envUrl.replace(/\/$/, "");
+  }
+  if (envUrl.includes("javis-backend") || envUrl.includes("onrender.com")) {
+    return "https://javis-backend-3pfy.onrender.com";
   }
   return `http://${envUrl}:8000`;
 }
 
 export const API_BASE = resolveApiBase();
 
+export function getActiveAgencyId(): string {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("yoursbuddy_agency_id")?.trim() || "default";
+  }
+  return "default";
+}
+
+export function setActiveAgencyId(agencyId: string): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem("yoursbuddy_agency_id", agencyId.trim() || "default");
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const targetUrl = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+  const agencyId = getActiveAgencyId();
+
   const res = await fetch(targetUrl, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "X-Agency-Id": agencyId,
       ...(init?.headers || {}),
     },
     cache: "no-store",
@@ -41,9 +62,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       if (text.startsWith("{") || text.startsWith("[")) {
         const parsed = JSON.parse(text);
         errorDetail = parsed.detail || parsed.message || text;
-      } else if (text.includes("<title>")) {
+      } else if (text.includes("<!DOCTYPE") || text.includes("<html") || text.includes("<title>")) {
         const titleMatch = text.match(/<title>([^<]+)<\/title>/i);
-        errorDetail = titleMatch ? titleMatch[1].trim() : `Server returned HTTP ${res.status}`;
+        const title = titleMatch ? titleMatch[1].trim() : `HTTP ${res.status}`;
+        errorDetail = `Backend service notice: ${title}. Connecting to cloud backend...`;
       }
     } catch {
       // ignore
