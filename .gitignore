@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+
+# Browser profile & runtime data
+data/
+exports/
+screenshots/
+*.db
+*.sqlite3
+*.log
+
+# Binaries & Tunnels
+bin/
+*.exe
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+npm-debug.log*
+

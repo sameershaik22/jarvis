@@ -1,0 +1,21 @@
+import type { Metadata } from "next";
+import "./globals.css";
+import { Sidebar } from "@/components/Sidebar";
+
+export const metadata: Metadata = {
+  title: "YoursBuddy AI — Podcast Host Research Agent",
+  description:
+    "Jarvis-like autonomous browser research agent for real estate podcast discovery, host research, verification, and Excel/CSV reporting.",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" className="dark">
+      <body className="min-h-screen flex bg-slate-950 text-slate-100 antialiased">
+        <Sidebar />
+        <main className="flex-1 min-w-0 overflow-y-auto p-6 lg:p-8">{children}</main>
+      </body>
+    </html>
+  );
+}
+

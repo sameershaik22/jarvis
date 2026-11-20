@@ -1,0 +1,47 @@
+services:
+  # Backend API & Autonomous Research Engine
+  - type: web
+    name: javis-backend
+    runtime: python
+    region: oregon
+    plan: free
+    branch: main
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt && playwright install --with-deps chromium
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: BROWSER_HEADLESS
+        value: "true"
+      - key: BROWSER_CHANNEL
+        value: chromium
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: APOLLO_API_KEY
+        sync: false
+
+  # Frontend Next.js Dashboard
+  - type: web
+    name: javis-frontend
+    runtime: node
+    region: oregon
+    plan: free
+    branch: main
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: NEXT_PUBLIC_BACKEND_URL
+        fromService:
+          name: javis-backend
+          type: web
+          property: host
