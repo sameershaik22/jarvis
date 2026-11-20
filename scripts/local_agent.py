@@ -74,7 +74,7 @@ def launch_local_chrome(port: int = 9222) -> bool:
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--mute-audio",
-                "https://www.linkedin.com",
+                "about:blank",
             ]
             subprocess.Popen(cmd)
             # Wait for startup

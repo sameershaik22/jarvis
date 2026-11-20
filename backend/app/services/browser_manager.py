@@ -206,7 +206,7 @@ class UserBrowserSession:
     async def start(self) -> dict[str, Any]:
         return {
             "channel": f"local_chrome ({self.device_name})",
-            "url": self.current_url or "https://www.linkedin.com",
+            "url": self.current_url or "about:blank",
             "tabs": self.tabs_count,
         }
 

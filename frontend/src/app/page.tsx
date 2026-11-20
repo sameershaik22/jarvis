@@ -398,7 +398,7 @@ export default function AgentWorkspacePage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="truncate text-xs text-cyan-300 font-mono flex-1 min-w-[200px]">
-              {status?.current_url || "Chrome connected on port 9222 — opens LinkedIn & YouTube in dedicated tabs."}
+              {status?.current_url || "Chrome Standby — Ready. Click 'Start Research' or enter a chat command to begin."}
             </div>
           </div>
 

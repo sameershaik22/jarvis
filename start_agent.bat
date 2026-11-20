@@ -40,8 +40,8 @@ if %ERRORLEVEL% equ 0 (
     echo [OK] Desktop Chrome is already running with remote debugging on port 9222.
 ) else (
     if defined CHROME_EXE (
-        echo [OK] Launching desktop Chrome with remote debugging on localhost:9222...
-        start "" "%CHROME_EXE%" --remote-debugging-port=9222 --user-data-dir="%LOCALAPPDATA%\Google\Chrome\AutomationData" --no-first-run --no-default-browser-check --mute-audio "https://www.linkedin.com"
+        echo [OK] Launching desktop Chrome in standby with remote debugging on localhost:9222...
+        start "" "%CHROME_EXE%" --remote-debugging-port=9222 --user-data-dir="%LOCALAPPDATA%\Google\Chrome\AutomationData" --no-first-run --no-default-browser-check --mute-audio "about:blank"
         timeout /t 2 /nobreak >nul
     ) else (
         echo [NOTICE] Chrome executable not found in default paths.

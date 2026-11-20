@@ -31,9 +31,9 @@ if (-not $cdpRunning) {
         if (Test-Path $p) { $found = $p; break }
     }
     if ($found) {
-        Write-Host "[1/2] Starting Chrome with remote debugging on port 9222..." -ForegroundColor Yellow
+        Write-Host "[1/2] Starting Chrome in standby with remote debugging on port 9222..." -ForegroundColor Yellow
         $userData = "${env:LocalAppData}\Google\Chrome\AutomationData"
-        Start-Process $found -ArgumentList "--remote-debugging-port=9222", "--user-data-dir=$userData", "--no-first-run", "--no-default-browser-check", "--mute-audio", "https://www.linkedin.com"
+        Start-Process $found -ArgumentList "--remote-debugging-port=9222", "--user-data-dir=$userData", "--no-first-run", "--no-default-browser-check", "--mute-audio", "about:blank"
         Start-Sleep -Seconds 2
     }
 }
