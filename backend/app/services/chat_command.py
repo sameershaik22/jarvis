@@ -104,6 +104,28 @@ async def handle_jarvis_command(db: Session, command: str, agency_id: str = "def
             "data": {"export_id": log.id, "filename": log.filename, "record_count": log.record_count},
         }
 
+    if intent == "conversational_help":
+        reply = (
+            "Hello! I am YoursBuddy AI, your autonomous real estate podcast host research agent. "
+            "To begin research, click 'Start Research' above or send an instruction like: "
+            "'Find real estate podcasts on LinkedIn and YouTube, identify hosts, and locate business emails'."
+        )
+        db.add(AgentMessage(agency_id=agency_id, role="assistant", content=reply, metadata_json={"intent": intent}))
+        db.commit()
+        return {"reply": reply, "intent": intent, "action_taken": "guidance_provided"}
+
+    # Guard: Only start research if intent is explicitly start_research or has clear research keywords
+    lower_cmd = command.lower()
+    has_research_keywords = any(w in lower_cmd for w in ("find", "search", "podcast", "host", "video", "research", "scrape", "discover", "look for", "show"))
+    if intent != "start_research" and not has_research_keywords:
+        reply = (
+            "I didn't recognize that as an automation command. "
+            "To begin autonomous research, click 'Start Research' above or enter a search prompt."
+        )
+        db.add(AgentMessage(agency_id=agency_id, role="assistant", content=reply, metadata_json={"intent": "unrecognized"}))
+        db.commit()
+        return {"reply": reply, "intent": "unrecognized", "action_taken": "noop"}
+
     keyword = parsed.get("keyword") or "Real Estate Podcast"
     max_posts = int(parsed.get("max_posts") or 10)
     task = await workflow_manager.start_task(

@@ -16,6 +16,19 @@ async def lifespan(_app: FastAPI):
     settings = get_settings()
     settings.ensure_directories()
     init_db()
+    # Auto-heal: Ensure any stale tasks from previous container restarts are marked stopped
+    try:
+        from app.db.models import ResearchTask
+        from app.db.session import SessionLocal
+        with SessionLocal() as db:
+            stale = db.query(ResearchTask).filter(ResearchTask.task_status == "running").all()
+            for t in stale:
+                t.task_status = "stopped"
+                t.current_stage = "stopped"
+            if stale:
+                db.commit()
+    except Exception:
+        pass
     yield
     await browser_controller.stop()
 

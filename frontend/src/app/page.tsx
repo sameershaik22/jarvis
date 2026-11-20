@@ -362,19 +362,21 @@ export default function AgentWorkspacePage() {
           <div className="text-xs uppercase tracking-wider text-slate-400">Continuous Task Status</div>
           <div className="flex items-center justify-between">
             <span className="font-semibold text-white truncate max-w-[200px]">
-              {task ? `#${task.id} — ${task.search_keyword}` : "Standby — ready for instruction"}
+              {status?.agent_state === "running" && task
+                ? `#${task.id} — ${task.search_keyword}`
+                : "Standby — ready for instruction"}
             </span>
-            {task && <StatusBadge status={task.task_status} />}
+            <StatusBadge status={status?.agent_state || "idle"} />
           </div>
           <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
             <div
               className="h-full bg-cyan-500 transition-all duration-300"
-              style={{ width: `${task?.progress ?? 0}%` }}
+              style={{ width: `${status?.agent_state === "running" ? (task?.progress ?? 0) : 0}%` }}
             />
           </div>
           <div className="text-xs text-slate-400 flex items-center justify-between">
-            <span>Stage: <strong className="text-slate-200">{task?.current_stage || "idle"}</strong></span>
-            <span>{task?.progress ?? 0}%</span>
+            <span>Stage: <strong className="text-slate-200">{status?.agent_state === "running" ? (task?.current_stage || "running") : "idle"}</strong></span>
+            <span>{status?.agent_state === "running" ? (task?.progress ?? 0) : 0}%</span>
           </div>
         </div>
 

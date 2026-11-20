@@ -98,14 +98,17 @@ class AIPlanner:
                 "summary": f"Prepare {fmt.upper()} export ({preset}).",
             }
 
-        if lower in {"pause", "pause research", "pause task"}:
-            return {"intent": "pause_research", "summary": "Pause the active research task."}
-        if lower in {"resume", "resume research", "continue"}:
-            return {"intent": "resume_research", "summary": "Resume the paused research task."}
-        if lower in {"stop", "stop research", "cancel"}:
+        # Deterministic fast-path for stop / pause / resume commands
+        if any(w in lower for w in ("stop", "cancel", "halt", "terminate", "kill", "abort", "shut down", "end research")):
             return {"intent": "stop_research", "summary": "Stop the active research task."}
-        if any(p in lower for p in ("show me the research", "research completed so far", "status", "summary", "overview")):
+        if any(w in lower for w in ("pause", "freeze", "hold on")):
+            return {"intent": "pause_research", "summary": "Pause the active research task."}
+        if any(w in lower for w in ("resume", "continue", "unpause")):
+            return {"intent": "resume_research", "summary": "Resume the paused research task."}
+        if any(p in lower for p in ("show me the research", "research completed so far", "status", "summary", "overview", "what leads", "how many")):
             return {"intent": "show_research_summary", "summary": "Summarize collected research from PostgreSQL."}
+        if lower in {"hi", "hello", "hey", "help", "what can you do", "who are you"}:
+            return {"intent": "conversational_help", "summary": "Provide conversational help and guidance."}
 
         # Check scope exclusions (Section 2)
         excluded_phrases = ("guest company", "marketing decision", "marketing employee", "cold email", "send email", "send linkedin message", "whatsapp")

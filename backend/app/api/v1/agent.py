@@ -118,6 +118,11 @@ async def get_agent_status(
                 .order_by(ResearchTask.id.desc())
                 .first()
             )
+        # Auto-heal: If no task is running in memory, ensure DB record is not marked as running
+        if active_task and workflow_manager.active_task_id is None and active_task.task_status == "running":
+            active_task.task_status = "stopped"
+            active_task.current_stage = "stopped"
+            db.commit()
 
         logs = (
             db.query(AgentActivityLog)
@@ -138,14 +143,15 @@ async def get_agent_status(
             return cached_entry[1]
 
     session = browser_manager.get_session(agency_id)
+    running_now = workflow_manager.agent_state == "running" and workflow_manager.active_task_id is not None
     if session.is_local_connected:
         status_info = await session.compute_browser_status()
-        cur_url = session.current_url or (active_task.current_url if active_task else None)
+        cur_url = session.current_url or (active_task.current_url if running_now else None)
         browser_active = True
         shot = session.last_screenshot_path
     else:
         status_info = await browser_controller.compute_browser_status()
-        cur_url = browser_controller.current_url or (active_task.current_url if active_task else None)
+        cur_url = browser_controller.current_url or (active_task.current_url if running_now else None)
         browser_active = browser_controller.is_active
         shot = await browser_controller.get_live_screenshot()
 
