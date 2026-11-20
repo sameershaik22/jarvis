@@ -65,14 +65,21 @@ def verify_host_and_contact(
 
     if not email:
         contact_status = "Unverified"
-    elif domain_matches_site and identity_status == "Verified" and email_category in ("host_direct_business", "podcast_business"):
+    elif email_category == "channel_inquiry":
+        # Never classify generic channel inquiry emails as verified personal business emails
+        contact_status = "Unverified"
+    elif domain_matches_site and identity_status == "Verified" and email_category == "host_direct_business":
         contact_status = "Verified"
-    elif contact_source_type in ("LinkedIn Profile", "YouTube About", "Official Website") and email:
-        contact_status = "Partially Verified" if not domain_matches_site else "Verified"
+    elif domain_matches_site and email_category in ("host_direct_business", "podcast_business"):
+        contact_status = "Partially Verified"
+    elif contact_source_type == "LinkedIn Profile" and email_category == "host_direct_business":
+        contact_status = "Verified"
+    elif contact_source_type in ("YouTube About", "Official Website") and email:
+        contact_status = "Partially Verified" if domain_matches_site else "Unverified"
     elif contact_source_type == "Apollo":
         contact_status = "Partially Verified" if identity_status in ("Verified", "Partially Verified") else "Manual Review Required"
     else:
-        contact_status = "Possible Match"
+        contact_status = "Unverified"
 
     confidence = min(100, max(host_confidence, signals * 18 + (15 if domain_matches_site else 0)))
     manual_review = identity_status in ("Manual Review Required", "Possible Match") or contact_status == "Manual Review Required"

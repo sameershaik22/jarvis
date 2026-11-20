@@ -17,6 +17,53 @@ GUEST_EXCLUSION_PATTERNS = [
 ]
 
 
+def is_valid_person_name(name: str | None, podcast_name: str | None = None) -> bool:
+    """Strictly validate that a name belongs to an actual individual human host, NOT a brand, channel, or phrase."""
+    if not name or not isinstance(name, str):
+        return False
+    clean = re.sub(r"[^\w\s\.\-']", "", name).strip()
+    tokens = clean.split()
+    if len(tokens) < 2 or len(tokens) > 4:
+        return False
+
+    # Disallow matching podcast or channel brand name
+    if podcast_name:
+        clean_pod = re.sub(r"[^\w\s]", "", podcast_name).lower().strip()
+        if clean.lower() == clean_pod or clean_pod in clean.lower():
+            return False
+
+    # Stop words / prepositions indicating titles, slogans, or channel descriptions
+    stop_words = {
+        "into", "the", "a", "an", "for", "with", "and", "by", "from",
+        "on", "in", "to", "of", "about", "at", "as", "or", "is", "your",
+        "our", "my", "how", "what", "why", "where", "who", "when", "all"
+    }
+    if any(t.lower() in stop_words for t in tokens):
+        return False
+
+    # Brand / media / corporate words that cannot be part of an individual's personal name
+    brand_words = {
+        "podcast", "show", "media", "tv", "productions", "production", "network",
+        "channel", "llc", "inc", "company", "group", "daily", "news",
+        "realty", "investing", "properties", "real", "estate", "cre", "break",
+        "blueprint", "talks", "digest", "capital", "partners", "ventures",
+        "studio", "studios", "radio", "hub", "insider", "live", "uncut",
+        "corp", "corporation", "ltd", "agency", "management", "financial",
+        "solutions", "holdings", "advisors", "equity", "bolt", "brick", "series",
+        "talk", "interviews", "unfiltered", "academy", "consulting", "enterprises",
+        "page", "listing", "tour", "tours", "service", "services", "official", "video", "videos"
+    }
+    if any(t.lower() in brand_words for t in tokens):
+        return False
+
+    # Each token in a person's name must start with an uppercase letter and consist of alphabetic characters
+    for t in tokens:
+        if not re.match(r"^[A-Z][a-zA-Z\.\-']+$", t):
+            return False
+
+    return True
+
+
 @dataclass
 class HostIdentificationResult:
     host_name: str | None
@@ -56,6 +103,8 @@ async def identify_podcast_host(
         evidence_urls.append(post_data["post_url"])
 
     host_name: str | None = (ai_entities or {}).get("host_name")
+    if host_name and not is_valid_person_name(host_name, podcast_name):
+        host_name = None
     confidence = int((ai_entities or {}).get("host_confidence") or 0)
 
     if not host_name:
@@ -63,34 +112,33 @@ async def identify_podcast_host(
             m = pat.search(caption)
             if m:
                 candidate = re.sub(r"\s+", " ", m.group(1)).strip()
-                if candidate.lower() not in guest_names:
+                if candidate.lower() not in guest_names and is_valid_person_name(candidate, podcast_name):
                     host_name = candidate
                     confidence = 78
                     break
 
-    # If posting account is a person's name (2-3 words, no company keywords), recognize as host
-    if not host_name and posting_account:
-        tokens = posting_account.split()
-        non_person_words = {
-            "podcast", "show", "media", "tv", "productions", "network",
-            "channel", "llc", "inc", "company", "group", "daily", "news",
-            "realty", "investing", "properties", "real", "estate"
-        }
-        if 2 <= len(tokens) <= 3 and not any(t.lower() in non_person_words for t in tokens):
-            if posting_account.lower() not in guest_names:
-                host_name = posting_account
-                confidence = 72
+    # If posting account is an actual person's name (and not a corporate/company account), recognize as host
+    is_company_acct = bool(posting_account_url and ("/company/" in posting_account_url.lower() or "/school/" in posting_account_url.lower()))
+    if not host_name and posting_account and not is_company_acct and is_valid_person_name(posting_account, podcast_name):
+        if posting_account.lower() not in guest_names:
+            host_name = posting_account
+            confidence = 72
 
     # If posting account is a personal LinkedIn profile (/in/) and not flagged as a guest, strong host signal
     host_linkedin_url: str | None = None
     if posting_account_url and "/in/" in posting_account_url:
-        if not host_name and posting_account and posting_account.lower() not in guest_names:
-            host_name = posting_account
-            confidence = 70
+        if not host_name and posting_account and is_valid_person_name(posting_account, podcast_name):
+            if posting_account.lower() not in guest_names:
+                host_name = posting_account
+                confidence = 70
         if host_name and posting_account and host_name.lower().split()[0] in posting_account.lower():
             host_linkedin_url = posting_account_url
             evidence_urls.append(host_linkedin_url)
             confidence = max(confidence, 82)
+
+    # Double check final host_name validity
+    if host_name and not is_valid_person_name(host_name, podcast_name):
+        host_name = None
 
     if not host_linkedin_url and classified_links["linkedin_profiles"]:
         host_linkedin_url = classified_links["linkedin_profiles"][0]

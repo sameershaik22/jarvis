@@ -279,6 +279,9 @@ async def test_apollo_fallback_discovery():
     with patch(
         "app.services.contact_discovery._apollo_person_enrich",
         new=AsyncMock(return_value=fake_apollo),
+    ), patch(
+        "app.services.contact_discovery.search_tavily",
+        new=AsyncMock(return_value=[]),
     ):
         contacts = await discover_host_contacts(
             post_data={"post_caption": "New episode out now!", "post_url": "https://www.linkedin.com/posts/1"},

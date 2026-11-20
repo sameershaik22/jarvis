@@ -309,7 +309,9 @@ class ResearchWorkflowManager:
         allow_live_browser: bool = True,
         agency_id: str = "default",
     ) -> dict[str, Any]:
-        """Execute Modules 3 -> 8 for a single discovered LinkedIn podcast post."""
+        """Execute Modules 3 -> 8 for a single discovered podcast post."""
+        if self._stop_requested:
+            return {"status": "Stopped", "is_new": False}
         post, is_new = upsert_linkedin_post(db, task_id, post_data, agency_id=agency_id)
         add_evidence(
             db,
@@ -357,8 +359,8 @@ class ResearchWorkflowManager:
         )
         db.commit()
 
-        # Proceed with entity & contact discovery as long as content is related to real estate/podcasts
-        if qa.qualification_status == "Rejected" and getattr(qa_res, "content_relevance", "") == "Not Relevant":
+        # If video is rejected, do not proceed with entity and contact discovery
+        if qa.qualification_status == "Rejected":
             return {"post_id": post.id, "status": "Rejected", "is_new": is_new}
 
         # Extract podcast & host AI reasoning if OpenAI configured
@@ -419,9 +421,10 @@ class ResearchWorkflowManager:
             host_confidence=host_res.confidence_score,
         )
 
-        # Persist normalized entities cleanly
+        # Persist normalized entities cleanly (strictly valid individual persons, not channel brands)
         host_person = None
-        if host_res.host_name:
+        from app.services.host_identifier import is_valid_person_name
+        if host_res.host_name and is_valid_person_name(host_res.host_name, orig_res.podcast_name):
             host_person = upsert_host_person(
                 db=db,
                 full_name=host_res.host_name,
@@ -750,13 +753,20 @@ class ResearchWorkflowManager:
             try:
                 t = db_done.query(ResearchTask).filter(ResearchTask.id == task_id).first()
                 if t:
-                    t.task_status = "stopped" if self._stop_requested else "completed"
-                    t.current_stage = "completed"
-                    t.progress = 100
-                    t.completed_at = datetime.now(timezone.utc)
+                    if self._stop_requested:
+                        t.task_status = "stopped"
+                        t.current_stage = "stopped"
+                        t.progress = min(t.progress or 0, 95)
+                        t.completed_at = datetime.now(timezone.utc)
+                    else:
+                        t.task_status = "completed"
+                        t.current_stage = "completed"
+                        t.progress = 100
+                        t.completed_at = datetime.now(timezone.utc)
                     final_stats = compute_dashboard_statistics(db_done, agency_id=agency_id)
+                    action_word = "stopped" if self._stop_requested else "completed"
                     summary_msg = (
-                        f"Research session stopped. Total collected in PostgreSQL: "
+                        f"Research session {action_word}. Total collected in PostgreSQL: "
                         f"{final_stats['qualified_podcasts']} qualified podcast(s), "
                         f"{final_stats['hosts_identified']} host(s), and "
                         f"{final_stats['emails_discovered']} email contact(s)."
@@ -775,7 +785,10 @@ class ResearchWorkflowManager:
                 db_done.close()
 
             self._agent_state = "idle"
-            await self._log(task_id, "completed", "done", "Research workflow finished. All data saved to PostgreSQL.", progress=100)
+            if self._stop_requested:
+                await self._log(task_id, "stopped", "stop", "Research session stopped by user.")
+            else:
+                await self._log(task_id, "completed", "done", "Research workflow finished. All data saved to PostgreSQL.", progress=100)
 
             # Best-effort n8n webhook trigger if configured
             settings = get_settings()

@@ -70,17 +70,41 @@ def _build_lead_dict(
     if contact and contact.research_notes:
         notes_parts.append(contact.research_notes)
 
+    raw_post_url = post.post_url if post else None
+    is_real_linkedin = bool(raw_post_url and "linkedin.com" in raw_post_url.lower())
+    is_youtube = bool(raw_post_url and ("youtube.com" in raw_post_url.lower() or "youtu.be" in raw_post_url.lower()))
+
+    # Keep LinkedIn post URLs separate from YouTube video and channel URLs
+    clean_linkedin_url = raw_post_url if is_real_linkedin else None
+    clean_original_podcast_url = (
+        (podcast.original_podcast_url if podcast and podcast.original_podcast_url else None)
+        or (raw_post_url if is_youtube else None)
+    )
+
+    # Strictly identify individual human podcast hosts (never channel/podcast names)
+    valid_host_name = None
+    if host and host.full_name:
+        from app.services.host_identifier import is_valid_person_name
+        pod_name = podcast.podcast_name if podcast else ""
+        if is_valid_person_name(host.full_name, pod_name) and getattr(host, "role_type", "host") == "host":
+            valid_host_name = host.full_name
+
+    id_status = host.identity_status if (host and valid_host_name) else "Unverified"
+    contact_status = contact.verification_status if (contact and contact.email) else "Unverified"
+    if contact and contact.email_category == "channel_inquiry" and contact_status == "Verified":
+        contact_status = "Unverified"
+
     return {
         "lead_id": lead_id,
         "linkedin_post_id": post.id if post else None,
         "podcast_id": podcast.id if podcast else None,
-        "host_id": host.id if host else None,
+        "host_id": host.id if (host and valid_host_name) else None,
         "company_id": company.id if company else None,
         "contact_id": contact.id if contact else None,
         "research_task_id": post.research_task_id if post else None,
         "podcast_name": podcast.podcast_name if podcast else (post.posting_account if post else "Unresolved Podcast"),
         "episode_title": podcast.episode_title if podcast else None,
-        "linkedin_post_url": post.post_url if post else None,
+        "linkedin_post_url": clean_linkedin_url,
         "video_posting_date": (
             post.published_at.strftime("%Y-%m-%d")
             if post and post.published_at
@@ -88,10 +112,10 @@ def _build_lead_dict(
         ),
         "youtube_channel_name": podcast.youtube_channel_name if podcast else None,
         "youtube_channel_url": podcast.youtube_channel_url if podcast else None,
-        "original_podcast_url": podcast.original_podcast_url if podcast else None,
-        "host_full_name": host.full_name if host else None,
-        "host_designation": host.designation if host else None,
-        "host_linkedin_url": host.linkedin_url if host else None,
+        "original_podcast_url": clean_original_podcast_url,
+        "host_full_name": valid_host_name,
+        "host_designation": host.designation if (host and valid_host_name) else None,
+        "host_linkedin_url": host.linkedin_url if (host and valid_host_name) else None,
         "host_company": company.company_name if company else None,
         "company_linkedin_url": company.linkedin_url if company else None,
         "company_website": company.website if company else (contact.official_website if contact else None),
@@ -108,10 +132,10 @@ def _build_lead_dict(
         "podcast_setup": qa.setup_quality if qa else None,
         "content_relevance": qa.content_relevance if qa else None,
         "qualification_status": qa.qualification_status if qa else "Pending",
-        "identity_verification_status": host.identity_status if host else "Unverified",
-        "contact_verification_status": contact.verification_status if contact else "Unverified",
+        "identity_verification_status": id_status,
+        "contact_verification_status": contact_status,
         "confidence_score": confidence,
-        "manual_review_required": manual_review,
+        "manual_review_required": manual_review or (not valid_host_name),
         "research_date": research_dt,
         "research_notes": " | ".join(notes_parts)[:1500] if notes_parts else None,
     }

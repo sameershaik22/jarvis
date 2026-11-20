@@ -758,11 +758,23 @@ class BrowserController:
 
         running_task = workflow_manager.agent_state == "running" and workflow_manager.active_task_id is not None
         paused_task = workflow_manager.agent_state == "paused" and workflow_manager.active_task_id is not None
+        cdp_up = self._is_cdp_available()
+        settings = get_settings()
+        is_cloud = bool(settings.browser_headless or settings.environment != "development")
 
         if not self.is_active:
+            status = (
+                "Research in progress"
+                if running_task
+                else (
+                    "Waiting for manual login"
+                    if paused_task
+                    else ("Chrome Connected" if cdp_up else ("Cloud Chromium Standby" if is_cloud else "Chrome Standby"))
+                )
+            )
             return {
-                "browser_status": "Research in progress" if running_task else ("Waiting for manual login" if paused_task else "Chrome Standby"),
-                "browser_active": False,
+                "browser_status": status,
+                "browser_active": bool(cdp_up),
                 "linkedin_authenticated": False,
                 "youtube_authenticated": False,
                 "current_url": self._last_url,
@@ -806,7 +818,7 @@ class BrowserController:
             elif yt_cookie:
                 status = "YouTube authenticated"
             else:
-                status = "Chrome Connected"
+                status = "Cloud Chromium Active" if is_cloud and not cdp_up else "Chrome Connected"
 
         return {
             "browser_status": status,
@@ -816,33 +828,72 @@ class BrowserController:
             "current_url": self._last_url,
         }
 
+    def _launch_external_browser_sync(self, target: str = "linkedin") -> dict[str, Any]:
+        """Launch browser or initialize cloud browser connection."""
+        settings = get_settings()
+        is_cloud = bool(settings.browser_headless or settings.environment != "development")
+        target_url = "https://www.linkedin.com/login" if target == "linkedin" else "https://www.youtube.com"
+
+        if not self._is_cdp_available() and not is_cloud:
+            import subprocess
+            for chrome_path in [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            ]:
+                if Path(chrome_path).exists():
+                    try:
+                        subprocess.Popen([
+                            chrome_path,
+                            "--remote-debugging-port=9222",
+                            f"--user-data-dir={settings.resolved_browser_user_data_dir}",
+                            "--no-first-run",
+                            "--no-default-browser-check",
+                            "--mute-audio",
+                            target_url,
+                        ])
+                        time.sleep(2)
+                        break
+                    except Exception as e:
+                        logger.debug("Failed launching local chrome: %s", e)
+
+        res = self._start_sync()
+        if target_url:
+            self._open_url_sync(target_url, screenshot_label=f"launch_{target}")
+
+        return {
+            "success": True,
+            "channel": res.get("channel", "active"),
+            "url": self._last_url or target_url,
+            "message": f"Browser active on {target}. Connect local agent if using desktop Chrome with cloud backend.",
+        }
+
     # Public Async Interface
     async def get_live_screenshot(self) -> str | None:
         return await self._run(self._get_live_screenshot_sync)
 
     async def compute_browser_status(self) -> dict[str, Any]:
-        from app.services.research_workflow import workflow_manager
+        return await self._run(self._compute_browser_status_sync)
 
-        running = workflow_manager.agent_state == "running" and workflow_manager.active_task_id is not None
-        paused = workflow_manager.agent_state == "paused" and workflow_manager.active_task_id is not None
-        cdp_up = self._is_cdp_available()
+    async def launch_external_browser(self, target: str = "linkedin") -> dict[str, Any]:
+        return await self._run(self._launch_external_browser_sync, target)
 
-        if running:
-            status = "Research in progress"
-        elif paused:
-            status = "Waiting for manual login"
-        elif cdp_up:
-            status = "Chrome Connected"
-        else:
-            status = "Chrome Standby"
+    async def close_external_browser(self) -> dict[str, Any]:
+        await self._run(self._stop_sync)
+        return {"success": True, "message": "Browser disconnected."}
 
-        return {
-            "browser_status": status,
-            "browser_active": cdp_up,
-            "linkedin_authenticated": False,
-            "youtube_authenticated": False,
-            "current_url": self._last_url,
-        }
+    async def reconnect_external_browser(self, target: str = "linkedin") -> dict[str, Any]:
+        await self._run(self._stop_sync)
+        await asyncio.sleep(0.5)
+        return await self._run(self._launch_external_browser_sync, target)
+
+    async def reset_browser_session(self) -> bool:
+        def _reset_sync():
+            self._disconnect_platform_sync("linkedin")
+            self._disconnect_platform_sync("youtube")
+            self._cached_auth_state = {"linkedin": False, "youtube": False}
+            self._cached_auth_time = 0.0
+            return True
+        return await self._run(_reset_sync)
 
     async def check_platform_auth(self, platform: str, force_navigate: bool = False) -> dict[str, Any]:
         if platform == "linkedin":
