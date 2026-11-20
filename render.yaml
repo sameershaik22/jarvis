@@ -9,6 +9,8 @@ services:
     plan: free
     branch: main
     envVars:
+      - key: PORT
+        value: "8000"
       - key: BROWSER_HEADLESS
         value: "true"
       - key: BROWSER_CHANNEL
@@ -37,6 +39,13 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20.18.0
+      - key: BACKEND_PORT
+        value: "8000"
+      - key: INTERNAL_BACKEND_URL
+        fromService:
+          name: javis-backend
+          type: web
+          property: host
       - key: NEXT_PUBLIC_BACKEND_URL
         fromService:
           name: javis-backend

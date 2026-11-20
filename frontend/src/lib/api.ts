@@ -5,11 +5,16 @@
  * - On the server side, allow an absolute URL if configured.
  */
 function resolveApiBase(): string {
+  const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL?.trim();
   if (typeof window !== "undefined") {
-    // Client-side browser: always route through same-origin Next.js rewrites
+    // If a full public HTTP(S) URL is explicitly provided, use it.
+    // If it's an internal container hostname (e.g. javis-backend-3pfy) or omitted,
+    // route through same-origin Next.js rewrites ("") so the browser doesn't 404.
+    if (envUrl && (envUrl.startsWith("http://") || envUrl.startsWith("https://"))) {
+      return envUrl.replace(/\/$/, "");
+    }
     return "";
   }
-  const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL?.trim();
   if (!envUrl) return "";
   if (envUrl.startsWith("http://") || envUrl.startsWith("https://")) {
     return envUrl.replace(/\/$/, "");

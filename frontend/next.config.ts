@@ -11,15 +11,18 @@ const nextConfig: NextConfig = {
       process.env.NEXT_PUBLIC_BACKEND_URL ||
       "";
 
+    const backendPort = process.env.BACKEND_PORT || "8000";
     let targetBackend = "http://127.0.0.1:8000";
 
     if (rawHost) {
       const trimmed = rawHost.trim();
       if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
         targetBackend = trimmed.replace(/\/$/, "");
+      } else if (trimmed.includes(":")) {
+        targetBackend = `http://${trimmed}`;
       } else {
         // Render internal private network hostname (e.g. javis-backend-3pfy)
-        targetBackend = `http://${trimmed}:8000`;
+        targetBackend = `http://${trimmed}:${backendPort}`;
       }
     }
 
