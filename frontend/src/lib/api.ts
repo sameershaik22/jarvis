@@ -1,8 +1,27 @@
-export const API_BASE =
-  process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/$/, "") || "";
+/**
+ * Resolves the base API URL.
+ * - In the browser, always use a relative URL ("") so calls route through Next.js rewrite proxies,
+ *   preventing broken internal hostnames (e.g. javis-backend-3pfy) and CORS/SSL mismatches.
+ * - On the server side, allow an absolute URL if configured.
+ */
+function resolveApiBase(): string {
+  if (typeof window !== "undefined") {
+    // Client-side browser: always route through same-origin Next.js rewrites
+    return "";
+  }
+  const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL?.trim();
+  if (!envUrl) return "";
+  if (envUrl.startsWith("http://") || envUrl.startsWith("https://")) {
+    return envUrl.replace(/\/$/, "");
+  }
+  return `http://${envUrl}:8000`;
+}
+
+export const API_BASE = resolveApiBase();
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const targetUrl = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+  const res = await fetch(targetUrl, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -11,8 +30,20 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     cache: "no-store",
   });
   if (!res.ok) {
-    const msg = await res.text();
-    throw new Error(msg || `Request failed with ${res.status}`);
+    let errorDetail = `Request failed with status ${res.status}`;
+    try {
+      const text = await res.text();
+      if (text.startsWith("{") || text.startsWith("[")) {
+        const parsed = JSON.parse(text);
+        errorDetail = parsed.detail || parsed.message || text;
+      } else if (text.includes("<title>")) {
+        const titleMatch = text.match(/<title>([^<]+)<\/title>/i);
+        errorDetail = titleMatch ? titleMatch[1].trim() : `Server returned HTTP ${res.status}`;
+      }
+    } catch {
+      // ignore
+    }
+    throw new Error(errorDetail);
   }
   return res.json() as Promise<T>;
 }

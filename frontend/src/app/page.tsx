@@ -281,8 +281,20 @@ export default function AgentWorkspacePage() {
       </div>
 
       {error && (
-        <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-200 text-sm">
-          {error} &mdash; make sure the FastAPI backend is running on {API_BASE}.
+        <div className="p-3.5 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-200 text-sm flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+            <span>
+              <strong>Backend Connection Notice:</strong> {error}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => loadStatus()}
+            className="px-2.5 py-1 text-xs rounded bg-rose-900/80 hover:bg-rose-800 border border-rose-700/60 text-rose-100 cursor-pointer transition-colors"
+          >
+            Retry Connection
+          </button>
         </div>
       )}
 
