@@ -1,17 +1,14 @@
 services:
-  # Backend API & Autonomous Research Engine
+  # Backend API & Autonomous Research Engine (Playwright in Docker with pre-baked Linux browser dependencies)
   - type: web
     name: javis-backend
-    runtime: python
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
     region: oregon
     plan: free
     branch: main
-    rootDir: backend
-    buildCommand: pip install -r requirements.txt && playwright install --with-deps chromium
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.0
       - key: BROWSER_HEADLESS
         value: "true"
       - key: BROWSER_CHANNEL
