@@ -130,7 +130,15 @@ async def handle_jarvis_command(db: Session, command: str, agency_id: str = "def
         db.commit()
         return {"reply": reply, "intent": "unrecognized", "action_taken": "noop"}
 
-    keyword = parsed.get("keyword") or "Real Estate Podcast"
+    keyword = parsed.get("keyword")
+    # If keyword fell back to default Real Estate Podcast but user didn't ask for real estate, dynamically extract topic
+    if not keyword or (keyword.lower() in ("real estate podcast", "real estate", "podcast") and "real estate" not in command.lower()):
+        from app.services.ai_planner import extract_keyword_from_text
+        extracted = extract_keyword_from_text(command)
+        if extracted and extracted.lower() not in ("podcast", "real estate podcast"):
+            keyword = extracted
+    if not keyword:
+        keyword = "Real Estate Podcast"
     max_posts = int(parsed.get("max_posts") or 10)
     task = await workflow_manager.start_task(
         instruction=command,

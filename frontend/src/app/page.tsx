@@ -261,7 +261,7 @@ export default function AgentWorkspacePage() {
             Jarvis Agent Workspace
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Autonomous Real Estate Podcast Research Agent &bull; Controls desktop Chrome via CDP &bull; Saves leads to Neon PostgreSQL
+            Autonomous Podcast Research Agent &bull; Topic: <strong className="text-cyan-300">{task?.search_keyword || "Custom Niche & Topics"}</strong> &bull; Saves leads to Neon PostgreSQL
           </p>
         </div>
 
@@ -270,11 +270,16 @@ export default function AgentWorkspacePage() {
           <button
             type="button"
             disabled={busy || status?.agent_state === "running"}
-            onClick={() =>
-              sendCommand(
-                "Find professional real estate podcasts on LinkedIn, prioritize recent video posts, identify hosts, find original YouTube channels, research their companies, and locate business emails."
-              )
-            }
+            onClick={() => {
+              const typedQuery = command.trim();
+              if (typedQuery) {
+                sendCommand(typedQuery);
+              } else {
+                sendCommand(
+                  "Find professional real estate podcasts on LinkedIn, prioritize recent video posts, identify hosts, find original YouTube channels, research their companies, and locate business emails."
+                );
+              }
+            }}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium cursor-pointer shadow-sm transition-all"
           >
             <Play className="w-4 h-4 fill-white" /> Start Research
@@ -523,7 +528,9 @@ export default function AgentWorkspacePage() {
         <div className="rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col h-[520px]">
           <div className="p-4 border-b border-slate-800 flex items-center justify-between">
             <span className="font-semibold text-white text-sm">Jarvis Command Console</span>
-            <span className="text-xs text-slate-400">Real Estate Scope</span>
+            <span className="text-xs text-cyan-400/90 font-mono">
+              {task?.search_keyword ? `${task.search_keyword} Scope` : "Autonomous Scope"}
+            </span>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -644,7 +651,9 @@ export default function AgentWorkspacePage() {
       <div className="rounded-xl bg-slate-900/80 border border-slate-800 overflow-hidden">
         <div className="p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <h2 className="font-semibold text-white text-base">Discovered Real Estate Podcast Leads</h2>
+            <h2 className="font-semibold text-white text-base">
+              Discovered {task?.search_keyword ? task.search_keyword : "Podcast"} Leads
+            </h2>
             <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-cyan-950 text-cyan-300 border border-cyan-800/60">
               {recentLeads.length} leads
             </span>

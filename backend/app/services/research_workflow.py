@@ -656,10 +656,10 @@ class ResearchWorkflowManager:
                                     candidate_url = y.get("video_url") or y.get("channel_url")
                                     if candidate_url and candidate_url not in seen_urls:
                                         seen_urls.add(candidate_url)
-                                        ch_name = y.get("channel_name") or y.get("title") or "Real Estate Podcast"
+                                        ch_name = y.get("channel_name") or y.get("title") or current_kw
                                         batch_candidates.append({
                                             "post_url": candidate_url,
-                                            "post_caption": f"{y.get('title', '')} - Real Estate Podcast by {ch_name}",
+                                            "post_caption": f"{y.get('title', '')} - {current_kw} by {ch_name}",
                                             "posting_account": ch_name,
                                             "posting_account_url": y.get("channel_url"),
                                             "video_url": y.get("video_url") if (y.get("video_url") and "/watch?v=" in str(y.get("video_url"))) else None,
@@ -725,7 +725,7 @@ class ResearchWorkflowManager:
                                     ch_url = u if ("youtube.com/@" in u or "youtube.com/channel/" in u or "youtube.com/c/" in u) else None
                                     batch_candidates.append({
                                         "post_url": u,
-                                        "post_caption": r.get("content") or f"{title} - Real Estate Podcast",
+                                        "post_caption": r.get("content") or f"{title} - {current_kw}",
                                         "posting_account": title,
                                         "posting_account_url": ch_url,
                                         "video_url": u if "youtube.com/watch" in u else None,

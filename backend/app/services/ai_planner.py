@@ -92,6 +92,9 @@ def extract_keyword_from_text(command: str) -> str:
     if not cleaned:
         return "Real Estate Podcast"
 
+    # Normalize 's podcast' shorthand or typo to 'SaaS Podcast'
+    cleaned = re.sub(r"\b[sS]\s+[pP]odcast\b", "SaaS Podcast", cleaned)
+
     if "podcast" not in cleaned.lower() and "show" not in cleaned.lower():
         cleaned = f"{cleaned} Podcast"
 
@@ -99,7 +102,9 @@ def extract_keyword_from_text(command: str) -> str:
     capitalized = []
     for w in words:
         w_lower = w.lower()
-        if w_lower in ("saas", "ai", "b2b", "b2c", "cto", "ceo", "cmo", "vc", "cre", "it", "llm", "hr"):
+        if w_lower == "saas":
+            capitalized.append("SaaS")
+        elif w_lower in ("ai", "b2b", "b2c", "cto", "ceo", "cmo", "vc", "cre", "it", "llm", "hr"):
             capitalized.append(w.upper())
         elif w_lower in ("and", "or", "for", "of", "in", "on", "with", "the", "to", "by"):
             capitalized.append(w_lower)

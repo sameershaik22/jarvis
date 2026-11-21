@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,6 +26,8 @@ from app.services.browser_controller import browser_controller
 from app.services.browser_manager import browser_manager
 from app.services.chat_command import handle_jarvis_command
 from app.services.research_workflow import workflow_manager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -139,6 +143,11 @@ async def get_agent_status(
             .all()
         )
     except Exception as db_exc:
+        logger.warning("DB query notice in get_agent_status: %s", db_exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
         if cached_entry:
             return cached_entry[1]
 

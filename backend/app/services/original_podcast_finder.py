@@ -42,7 +42,7 @@ def _extract_podcast_name_guess(caption: str, posting_account: str) -> str:
             return re.sub(r"\s+", " ", m.group(1)).strip(" .,-|")
     if posting_account and "podcast" in posting_account.lower():
         return posting_account.strip()
-    return f"{posting_account.strip()} Real Estate Podcast" if posting_account else "Real Estate Podcast"
+    return f"{posting_account.strip()} Podcast" if posting_account else "Podcast"
 
 
 def _extract_episode_title_guess(caption: str) -> str | None:
