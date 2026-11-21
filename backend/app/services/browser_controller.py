@@ -165,28 +165,45 @@ class BrowserController:
         if not self._is_cdp_available():
             settings = get_settings()
             if settings.browser_headless or settings.environment != "development":
-                logger.info("CDP not detected on port 9222; launching headless Chromium for cloud environment.")
-                if self._pw is None:
-                    self._pw = sync_playwright().start()
-                self._browser = self._pw.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-setuid-sandbox", "--mute-audio", "--disable-dev-shm-usage"],
-                )
-                self._context = self._browser.new_context()
+                logger.info("CDP not detected on port 9222; attempting ultra-lean headless Chromium for cloud environment.")
                 try:
-                    self._context.add_init_script(MUTE_AUDIO_SCRIPT)
-                except Exception:
-                    pass
-                self._page = self._context.new_page()
-                self._active = True
-                self._last_url = self._page.url
-                return {"started": True, "url": self._page.url, "channel": "headless_cloud_chromium"}
+                    if self._pw is None:
+                        self._pw = sync_playwright().start()
+                    self._browser = self._pw.chromium.launch(
+                        headless=True,
+                        args=[
+                            "--no-sandbox",
+                            "--disable-setuid-sandbox",
+                            "--disable-dev-shm-usage",
+                            "--disable-gpu",
+                            "--no-zygote",
+                            "--single-process",
+                            "--disable-extensions",
+                            "--disable-background-networking",
+                            "--disable-renderer-backgrounding",
+                            "--mute-audio",
+                            "--disable-software-rasterizer",
+                            "--js-flags=--max-old-space-size=128",
+                        ],
+                    )
+                    self._context = self._browser.new_context()
+                    try:
+                        self._context.add_init_script(MUTE_AUDIO_SCRIPT)
+                    except Exception:
+                        pass
+                    self._page = self._context.new_page()
+                    self._active = True
+                    self._last_url = self._page.url
+                    return {"started": True, "url": self._page.url, "channel": "headless_cloud_chromium"}
+                except Exception as exc:
+                    logger.warning("Cloud headless Chromium could not start: %s. Using Cloud Discovery Fallback.", exc)
+                    self._active = False
+                    return {"started": False, "url": "about:blank", "channel": "cloud_discovery_fallback", "error": str(exc)}
 
             self._active = False
             raise RuntimeError(
                 "Google Chrome is not running with remote debugging enabled on port 9222. "
-                "Please start Chrome using 'Launch Chrome for YoursBuddy.bat' on your Desktop "
-                "(or run: chrome.exe --remote-debugging-port=9222), then click Start Research."
+                "Please run 'start_agent.bat' on your computer to connect your desktop Chrome, then click Start Research."
             )
 
         if self._pw is None:

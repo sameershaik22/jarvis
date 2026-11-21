@@ -330,13 +330,16 @@ class ResearchWorkflowManager:
         # Module 3 — Video Quality Assessment
         frames = frame_paths or []
         v_meta = video_meta or {"found": bool(post.video_url)}
-        if allow_live_browser and not frames and post.post_url:
-            nav = await active_b.open_url(post.post_url, screenshot_label=f"post_{post.id}")
-            if nav.success and (not nav.gate or not nav.gate.restricted):
-                cap = await active_b.capture_video_frames(max_frames=2)
-                frames = cap.get("frame_paths", [])
-                v_meta = cap.get("video_meta", {})
-                audio_accessible = cap.get("audio_accessible", False)
+        if allow_live_browser and not frames and post.post_url and getattr(active_b, "is_active", False):
+            try:
+                nav = await active_b.open_url(post.post_url, screenshot_label=f"post_{post.id}")
+                if nav.success and (not nav.gate or not nav.gate.restricted):
+                    cap = await active_b.capture_video_frames(max_frames=2)
+                    frames = cap.get("frame_paths", [])
+                    v_meta = cap.get("video_meta", {})
+                    audio_accessible = cap.get("audio_accessible", False)
+            except Exception as b_err:
+                logger.debug("Frame capture skipped or failed: %s", b_err)
 
         qa_res = await assess_podcast_video(
             caption=post.post_caption,
@@ -544,15 +547,33 @@ class ResearchWorkflowManager:
             if use_browser:
                 agency_session = browser_manager.get_session(agency_id)
                 active_browser = agency_session if agency_session.is_local_connected else self.browser
-                info = await active_browser.start()
-                await self._log(
-                    task_id,
-                    "browser_ready",
-                    "launch",
-                    f"Browser active ({info.get('channel')}). Navigating to LinkedIn search.",
-                    url=info.get("url"),
-                    progress=10,
-                )
+                browser_started = False
+                info: dict[str, Any] = {}
+                try:
+                    info = await active_browser.start()
+                    browser_started = bool(info.get("started", True) and getattr(active_browser, "is_active", False))
+                except Exception as b_exc:
+                    logger.warning("Browser startup notice: %s", b_exc)
+                    browser_started = False
+
+                if browser_started:
+                    await self._log(
+                        task_id,
+                        "browser_ready",
+                        "launch",
+                        f"Browser active ({info.get('channel')}). Navigating to LinkedIn search.",
+                        url=info.get("url"),
+                        progress=10,
+                    )
+                else:
+                    await self._log(
+                        task_id,
+                        "browser_notice",
+                        "fallback",
+                        "Desktop Chrome bridge agent offline. Operating in Cloud Discovery Mode (Tavily + YouTube public data). Run start_agent.bat on your PC to automate your desktop Chrome.",
+                        url=None,
+                        progress=10,
+                    )
 
                 # Continuous Autonomous Research Loop
                 # Continues searching across real estate podcast keywords across YouTube & LinkedIn until user stops
@@ -575,7 +596,7 @@ class ResearchWorkflowManager:
                     cycle += 1
                     batch_candidates: list[dict[str, Any]] = []
 
-                    # 1. YouTube Discovery (Dedicated YouTube Tab in existing Chrome window)
+                    # 1. YouTube Discovery (Dedicated YouTube Tab in existing Chrome window if active)
                     yt_query = current_kw if "podcast" in current_kw.lower() else f"{current_kw} podcast"
                     yt_search_url = build_youtube_search_url(yt_query)
                     await self._log(
@@ -586,71 +607,73 @@ class ResearchWorkflowManager:
                         url=yt_search_url,
                         progress=min(95, 20 + (cycle % 12) * 5),
                     )
-                    try:
-                        yt_nav = await active_browser.open_url(yt_search_url, screenshot_label=f"yt_search_{cycle}")
-                        if yt_nav.success:
-                            await active_browser.scroll("down", 1000)
-                            await asyncio.sleep(1)
-                            yt_html = await active_browser.get_html()
-                            yt_results = parse_youtube_search_results_from_html(yt_html)
-                            for y in yt_results:
-                                candidate_url = y.get("video_url") or y.get("channel_url")
-                                if candidate_url and candidate_url not in seen_urls:
-                                    seen_urls.add(candidate_url)
-                                    ch_name = y.get("channel_name") or y.get("title") or "Real Estate Podcast"
-                                    batch_candidates.append({
-                                        "post_url": candidate_url,
-                                        "post_caption": f"{y.get('title', '')} - Real Estate Podcast by {ch_name}",
-                                        "posting_account": ch_name,
-                                        "posting_account_url": y.get("channel_url"),
-                                        "video_url": y.get("video_url") if (y.get("video_url") and "/watch?v=" in str(y.get("video_url"))) else None,
-                                        "has_video_element": True,
-                                        "published_label": "YouTube",
-                                        "keywords_matched": [current_kw, "podcast"],
-                                        "external_urls": [u for u in [candidate_url, y.get("channel_url")] if u],
-                                        "comments": [],
-                                        "youtube_channel_url": y.get("channel_url"),
-                                        "podcast_name": ch_name,
-                                        "episode_title": y.get("title"),
-                                    })
-                    except Exception as yt_err:
-                        logger.warning("YouTube search step encountered error: %s", yt_err)
+                    if browser_started and getattr(active_browser, "is_active", False):
+                        try:
+                            yt_nav = await active_browser.open_url(yt_search_url, screenshot_label=f"yt_search_{cycle}")
+                            if yt_nav.success:
+                                await active_browser.scroll("down", 1000)
+                                await asyncio.sleep(1)
+                                yt_html = await active_browser.get_html()
+                                yt_results = parse_youtube_search_results_from_html(yt_html)
+                                for y in yt_results:
+                                    candidate_url = y.get("video_url") or y.get("channel_url")
+                                    if candidate_url and candidate_url not in seen_urls:
+                                        seen_urls.add(candidate_url)
+                                        ch_name = y.get("channel_name") or y.get("title") or "Real Estate Podcast"
+                                        batch_candidates.append({
+                                            "post_url": candidate_url,
+                                            "post_caption": f"{y.get('title', '')} - Real Estate Podcast by {ch_name}",
+                                            "posting_account": ch_name,
+                                            "posting_account_url": y.get("channel_url"),
+                                            "video_url": y.get("video_url") if (y.get("video_url") and "/watch?v=" in str(y.get("video_url"))) else None,
+                                            "has_video_element": True,
+                                            "published_label": "YouTube",
+                                            "keywords_matched": [current_kw, "podcast"],
+                                            "external_urls": [u for u in [candidate_url, y.get("channel_url")] if u],
+                                            "comments": [],
+                                            "youtube_channel_url": y.get("channel_url"),
+                                            "podcast_name": ch_name,
+                                            "episode_title": y.get("title"),
+                                        })
+                        except Exception as yt_err:
+                            logger.warning("YouTube search step encountered error: %s", yt_err)
 
-                    # 2. LinkedIn Discovery (Dedicated LinkedIn Tab in existing Chrome window)
-                    li_search_url = build_linkedin_video_search_url(current_kw)
-                    await self._log(
-                        task_id,
-                        "linkedin_search",
-                        "navigate",
-                        f"Searching LinkedIn Posts (video) for '{current_kw}' (cycle {cycle})...",
-                        url=li_search_url,
-                        progress=min(95, 22 + (cycle % 12) * 5),
-                    )
-                    try:
-                        li_nav = await active_browser.open_url(li_search_url, screenshot_label=f"li_search_{cycle}")
-                        if li_nav.gate and li_nav.gate.restricted:
-                            await self._log(
-                                task_id,
-                                "access_gate",
-                                li_nav.gate.gate_type or "login_wall",
-                                f"LinkedIn login page open in Chrome. Sign in when convenient to enable full LinkedIn feed scraping. YouTube & public podcast network research continues seamlessly.",
-                                url=li_nav.url,
-                                level="WARNING",
-                                screenshot_path=li_nav.screenshot_path,
-                            )
-                        elif li_nav.success:
-                            for scroll_idx in range(2):
-                                if self._stop_requested or not await self._wait_if_paused(task_id):
-                                    break
-                                html = await active_browser.get_html()
-                                parsed = parse_linkedin_posts_from_html(html, keyword=current_kw)
-                                for item in parsed:
-                                    if item["post_url"] not in seen_urls:
-                                        seen_urls.add(item["post_url"])
-                                        batch_candidates.append(item)
-                                await active_browser.scroll("down", 800)
-                    except Exception as li_err:
-                        logger.warning("LinkedIn search step encountered error: %s", li_err)
+                    # 2. LinkedIn Discovery (Dedicated LinkedIn Tab in existing Chrome window if active)
+                    if browser_started and getattr(active_browser, "is_active", False):
+                        li_search_url = build_linkedin_video_search_url(current_kw)
+                        await self._log(
+                            task_id,
+                            "linkedin_search",
+                            "navigate",
+                            f"Searching LinkedIn Posts (video) for '{current_kw}' (cycle {cycle})...",
+                            url=li_search_url,
+                            progress=min(95, 22 + (cycle % 12) * 5),
+                        )
+                        try:
+                            li_nav = await active_browser.open_url(li_search_url, screenshot_label=f"li_search_{cycle}")
+                            if li_nav.gate and li_nav.gate.restricted:
+                                await self._log(
+                                    task_id,
+                                    "access_gate",
+                                    li_nav.gate.gate_type or "login_wall",
+                                    f"LinkedIn login page open in Chrome. Sign in when convenient to enable full LinkedIn feed scraping. YouTube & public podcast network research continues seamlessly.",
+                                    url=li_nav.url,
+                                    level="WARNING",
+                                    screenshot_path=li_nav.screenshot_path,
+                                )
+                            elif li_nav.success:
+                                for scroll_idx in range(2):
+                                    if self._stop_requested or not await self._wait_if_paused(task_id):
+                                        break
+                                    html = await active_browser.get_html()
+                                    parsed = parse_linkedin_posts_from_html(html, keyword=current_kw)
+                                    for item in parsed:
+                                        if item["post_url"] not in seen_urls:
+                                            seen_urls.add(item["post_url"])
+                                            batch_candidates.append(item)
+                                    await active_browser.scroll("down", 800)
+                        except Exception as li_err:
+                            logger.warning("LinkedIn search step encountered error: %s", li_err)
 
                     # 3. Augmented discovery via Tavily if candidates are low
                     if len(batch_candidates) < 3 and not self._stop_requested:
@@ -744,10 +767,11 @@ class ResearchWorkflowManager:
                             db_item.close()
 
                     # Clean up any extra background tabs opened during research to free RAM and CPU
-                    try:
-                        await active_browser.cleanup_stray_tabs()
-                    except Exception:
-                        pass
+                    if browser_started and getattr(active_browser, "is_active", False):
+                        try:
+                            await active_browser.cleanup_stray_tabs()
+                        except Exception:
+                            pass
 
                     # Pause briefly before next cycle
                     if self._stop_requested:

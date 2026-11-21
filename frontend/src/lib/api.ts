@@ -6,7 +6,7 @@
  *     https://javis-backend-3pfy.onrender.com to avoid private network lookup failures on Render Free tier.
  *   - In local development, return "" to use Next.js rewrites proxying to localhost:8000.
  */
-function resolveApiBase(): string {
+export function getApiBase(): string {
   const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL?.trim();
   if (typeof window !== "undefined") {
     if (envUrl && (envUrl.startsWith("http://") || envUrl.startsWith("https://"))) {
@@ -17,17 +17,17 @@ function resolveApiBase(): string {
     }
     return "";
   }
-  if (!envUrl) return "http://127.0.0.1:8000";
+  if (!envUrl) return "https://javis-backend-3pfy.onrender.com";
   if (envUrl.startsWith("http://") || envUrl.startsWith("https://")) {
     return envUrl.replace(/\/$/, "");
   }
   if (envUrl.includes("javis-backend") || envUrl.includes("onrender.com")) {
     return "https://javis-backend-3pfy.onrender.com";
   }
-  return `http://${envUrl}:8000`;
+  return "https://javis-backend-3pfy.onrender.com";
 }
 
-export const API_BASE = resolveApiBase();
+export const API_BASE = getApiBase();
 
 export function getActiveAgencyId(): string {
   if (typeof window !== "undefined") {
@@ -43,18 +43,34 @@ export function setActiveAgencyId(agencyId: string): void {
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const targetUrl = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+  const base = getApiBase();
+  const targetUrl = `${base}${path.startsWith("/") ? path : `/${path}`}`;
   const agencyId = getActiveAgencyId();
 
-  const res = await fetch(targetUrl, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Agency-Id": agencyId,
-      ...(init?.headers || {}),
-    },
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(targetUrl, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Agency-Id": agencyId,
+        ...(init?.headers || {}),
+      },
+      cache: "no-store",
+    });
+  } catch (fetchErr: any) {
+    const msg = String(fetchErr?.message || "");
+    if (
+      msg.includes("Failed to fetch") ||
+      msg.includes("NetworkError") ||
+      msg.includes("Load failed") ||
+      fetchErr?.name === "TypeError"
+    ) {
+      throw new Error("Cloud backend waking up from sleep (Render free tier spin-up ~40s)... synchronizing");
+    }
+    throw fetchErr;
+  }
+
   if (!res.ok) {
     let errorDetail = `Request failed with status ${res.status}`;
     try {

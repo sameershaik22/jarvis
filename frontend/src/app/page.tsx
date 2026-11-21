@@ -21,7 +21,7 @@ import {
   UserCheck,
   X,
 } from "lucide-react";
-import { API_BASE, apiFetch } from "@/lib/api";
+import { API_BASE, apiFetch, getApiBase } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ExportControls } from "@/components/ExportControls";
 
@@ -190,19 +190,28 @@ export default function AgentWorkspacePage() {
   useEffect(() => {
     loadStatus();
     const timer = setInterval(loadStatus, 4000);
-    const es = new EventSource(`${API_BASE}/api/v1/agent/events`);
+    let es: EventSource | null = null;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    es.onmessage = () => {
-      // Debounce SSE updates so rapid log bursts trigger only 1 status poll
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        loadStatus();
-      }, 1500);
-    };
+    try {
+      const base = getApiBase();
+      es = new EventSource(`${base}/api/v1/agent/events`);
+      es.onmessage = () => {
+        // Debounce SSE updates so rapid log bursts trigger only 1 status poll
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          loadStatus();
+        }, 1500);
+      };
+      es.onerror = () => {
+        // Suppress noisy network errors during cold-start spin-ups
+      };
+    } catch {
+      // EventSource fallback to interval polling
+    }
     return () => {
       clearInterval(timer);
       if (debounceTimer) clearTimeout(debounceTimer);
-      es.close();
+      if (es) es.close();
     };
   }, [loadStatus]);
 
@@ -296,21 +305,42 @@ export default function AgentWorkspacePage() {
       </div>
 
       {error && (
-        <div className="p-3.5 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-200 text-sm flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
-            <span>
-              <strong>Backend Connection Notice:</strong> {error}
-            </span>
+        error.includes("waking up") || error.includes("spin-up") || error.includes("synchronizing") ? (
+          <div className="p-3.5 rounded-lg bg-amber-950/70 border border-amber-700/80 text-amber-200 text-sm flex flex-wrap items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0" />
+              <span>
+                <strong>Cloud Service Waking Up:</strong> Render free-tier container is spinning up (~40s cold start). Automatically synchronizing leads and research status...
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-amber-300 font-mono animate-pulse">Auto-retrying...</span>
+              <button
+                type="button"
+                onClick={() => loadStatus()}
+                className="px-2.5 py-1 text-xs rounded bg-amber-900/80 hover:bg-amber-800 border border-amber-600/60 text-amber-100 cursor-pointer transition-colors"
+              >
+                Retry Now
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => loadStatus()}
-            className="px-2.5 py-1 text-xs rounded bg-rose-900/80 hover:bg-rose-800 border border-rose-700/60 text-rose-100 cursor-pointer transition-colors"
-          >
-            Retry Connection
-          </button>
-        </div>
+        ) : (
+          <div className="p-3.5 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-200 text-sm flex flex-wrap items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+              <span>
+                <strong>Backend Connection Notice:</strong> {error}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => loadStatus()}
+              className="px-2.5 py-1 text-xs rounded bg-rose-900/80 hover:bg-rose-800 border border-rose-700/60 text-rose-100 cursor-pointer transition-colors"
+            >
+              Retry Connection
+            </button>
+          </div>
+        )
       )}
 
       {/* Real-time Summary Cards */}
