@@ -63,6 +63,7 @@ def extract_keyword_from_text(command: str) -> str:
         r"^(?:start\s+automation\s+for|automate\s+search\s+for|run\s+research\s+on)\s+",
         r"^(?:i\s+want\s+to\s+search\s+for|i\s+need\s+to\s+search\s+for|i\s+want\s+to\s+find|i\s+want)\s+",
         r"^(?:can\s+you\s+please\s+find|can\s+you\s+find)\s+",
+        r"^(?:please\s+)?(?:export|download)\s+(?:all\s+)?",
     ]
     for pat in lead_patterns:
         cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
@@ -80,6 +81,9 @@ def extract_keyword_from_text(command: str) -> str:
         r"\s+and\s+search.*$",
         r"\s+hosts?\s+and\s+emails?.*$",
         r"\s+hosts?.*$",
+        r"\s+leads\s+to\s+(?:excel|csv|xlsx).*$",
+        r"\s+to\s+(?:excel|csv|xlsx).*$",
+        r"\s+leads.*$",
     ]
     for pat in trail_patterns:
         cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
