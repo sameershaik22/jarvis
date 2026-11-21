@@ -165,9 +165,11 @@ export default function AgentWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [shotTick, setShotTick] = useState(0);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [pendingUserMsg, setPendingUserMsg] = useState<string | null>(null);
 
   const inFlightRef = useRef(false);
   const lastShotRef = useRef(0);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadStatus = useCallback(async () => {
     if (inFlightRef.current) return;
@@ -217,20 +219,26 @@ export default function AgentWorkspacePage() {
     };
   }, [loadStatus]);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [status?.messages, pendingUserMsg]);
+
   async function sendCommand(text?: string) {
     const payload = (text ?? command).trim();
     if (!payload) return;
     setBusy(true);
+    setPendingUserMsg(payload);
+    if (!text) setCommand("");
     try {
       await apiFetch("/api/v1/agent/command", {
         method: "POST",
         body: JSON.stringify({ command: payload }),
       });
-      if (!text) setCommand("");
       await loadStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed sending command");
     } finally {
+      setPendingUserMsg(null);
       setBusy(false);
     }
   }
@@ -574,6 +582,19 @@ export default function AgentWorkspacePage() {
                 )}
               </div>
             ))}
+            {pendingUserMsg && (
+              <>
+                <div className="p-3 rounded-lg text-sm bg-cyan-950/60 border border-cyan-800/50 ml-8 text-cyan-50">
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">You</div>
+                  <div className="whitespace-pre-wrap">{pendingUserMsg}</div>
+                </div>
+                <div className="p-3 rounded-lg text-sm bg-slate-800/70 border border-slate-700/70 mr-8 text-slate-100 flex items-center gap-2.5">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                  <span className="text-xs text-cyan-300 font-mono">Analyzing prompt & initiating autonomous research...</span>
+                </div>
+              </>
+            )}
+            <div ref={messagesEndRef} />
           </div>
 
           <form

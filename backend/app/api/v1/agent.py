@@ -55,6 +55,7 @@ async def start_research(
     payload: AgentStartRequest,
     agency_id: str = Depends(get_agency_id),
 ) -> AgentTaskSummary:
+    _cached_status_responses.pop(agency_id, None)
     task = await workflow_manager.start_task(
         instruction=payload.instruction,
         search_keyword=payload.search_keyword,
@@ -67,17 +68,20 @@ async def start_research(
 
 
 @router.post("/pause")
-async def pause_research() -> dict[str, bool]:
+async def pause_research(agency_id: str = Depends(get_agency_id)) -> dict[str, bool]:
+    _cached_status_responses.pop(agency_id, None)
     return {"paused": await workflow_manager.pause_task()}
 
 
 @router.post("/resume")
-async def resume_research() -> dict[str, bool]:
+async def resume_research(agency_id: str = Depends(get_agency_id)) -> dict[str, bool]:
+    _cached_status_responses.pop(agency_id, None)
     return {"resumed": await workflow_manager.resume_task()}
 
 
 @router.post("/stop")
-async def stop_research() -> dict[str, bool]:
+async def stop_research(agency_id: str = Depends(get_agency_id)) -> dict[str, bool]:
+    _cached_status_responses.pop(agency_id, None)
     return {"stopped": await workflow_manager.stop_task()}
 
 
@@ -135,13 +139,14 @@ async def get_agent_status(
             .limit(20)
             .all()
         )
-        messages = (
+        recent_messages = (
             db.query(AgentMessage)
             .filter(AgentMessage.agency_id == agency_id)
-            .order_by(AgentMessage.id.asc())
-            .limit(30)
+            .order_by(AgentMessage.id.desc())
+            .limit(50)
             .all()
         )
+        messages = list(reversed(recent_messages))
     except Exception as db_exc:
         logger.warning("DB query notice in get_agent_status: %s", db_exc)
         try:
@@ -252,6 +257,7 @@ async def send_command(
     agency_id: str = Depends(get_agency_id),
     db: Session = Depends(get_db),
 ) -> AgentCommandResponse:
+    _cached_status_responses.pop(agency_id, None)
     res = await handle_jarvis_command(db, payload.command, agency_id=agency_id)
     return AgentCommandResponse(**res)
 
