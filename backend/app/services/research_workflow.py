@@ -68,6 +68,52 @@ class LiveEventBus:
             self._subscribers.discard(q)
 
 
+def generate_search_keyword_variations(primary_keyword: str) -> list[str]:
+    """Generate dynamic contextual search queries based on the user's chosen topic or niche."""
+    kw = (primary_keyword or "Real Estate Podcast").strip()
+    results = [kw]
+
+    # Split composite keywords ('X and Y')
+    parts = [p.strip() for p in kw.split(" and ") if p.strip()]
+    for p in parts:
+        if p not in results:
+            results.append(p)
+
+    is_real_estate = any(w in kw.lower() for w in ("real estate", "property", "multifamily", "commercial real estate", "cre"))
+    if is_real_estate:
+        re_defaults = [
+            "Commercial Real Estate Podcast",
+            "Multifamily Real Estate Podcast",
+            "Real Estate Investing Show",
+            "Real Estate Host Interview",
+            "Property Investment Podcast",
+            "Real Estate Syndication Show",
+            "Real Estate Development Podcast",
+        ]
+        for r in re_defaults:
+            if r not in results:
+                results.append(r)
+    else:
+        # Build contextual variations based on the user's specific topics/roles
+        for p in parts:
+            clean = p.replace(" Podcasts", "").replace(" podcasts", "").replace(" Podcast", "").replace(" podcast", "").replace(" Shows", "").replace(" Show", "").replace(" show", "").strip()
+            if not clean:
+                continue
+            variations = [
+                f"{clean} Podcast",
+                f"{clean} Show",
+                f"{clean} Founder Interview",
+                f"{clean} Host Interview",
+                f"Top {clean} Podcast",
+                f"B2B {clean} Podcast",
+            ]
+            for v in variations:
+                if v not in results:
+                    results.append(v)
+
+    return results[:8]
+
+
 class ResearchWorkflowManager:
     """Orchestrates Jarvis-like autonomous browser research with pause/resume/stop & checkpoints."""
 
@@ -576,17 +622,8 @@ class ResearchWorkflowManager:
                     )
 
                 # Continuous Autonomous Research Loop
-                # Continues searching across real estate podcast keywords across YouTube & LinkedIn until user stops
-                SEARCH_KEYWORDS = [
-                    keyword,
-                    "Commercial Real Estate Podcast",
-                    "Multifamily Real Estate Podcast",
-                    "Real Estate Investing Show",
-                    "Real Estate Host Interview",
-                    "Property Investment Podcast",
-                    "Real Estate Syndication Show",
-                    "Real Estate Development Podcast",
-                ]
+                # Continues searching across user-specified podcast topic keywords across YouTube & LinkedIn until user stops
+                SEARCH_KEYWORDS = generate_search_keyword_variations(keyword)
                 seen_urls: set[str] = set()
                 total_processed = 0
                 cycle = 0

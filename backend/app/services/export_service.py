@@ -48,6 +48,7 @@ EXCEL_COLUMNS: list[tuple[str, str]] = [
     ("Confidence Score", "confidence_score"),
     ("Research Date", "research_date"),
     ("Research Notes", "research_notes"),
+    ("Search Keyword / Niche", "search_keyword"),
 ]
 
 URL_FIELDS = {
@@ -255,7 +256,24 @@ def generate_excel_export(
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     uid = uuid.uuid4().hex[:6]
-    filename = f"YoursBuddy_Podcast_Host_Research_{today}_{uid}.xlsx"
+
+    kw_target = f.get("keyword") or f.get("search")
+    if not kw_target and f.get("research_task_id"):
+        try:
+            from app.db.models import ResearchTask
+            t = db.query(ResearchTask).filter(ResearchTask.id == int(f["research_task_id"])).first()
+            if t and t.search_keyword:
+                kw_target = t.search_keyword
+        except Exception:
+            pass
+
+    if kw_target and str(kw_target).strip() and str(kw_target).lower() not in ("all", "all leads", "default", "none"):
+        clean_kw = "".join(c if c.isalnum() else "_" for c in str(kw_target).strip()).strip("_")[:35]
+        clean_kw = "_".join(part for part in clean_kw.split("_") if part)
+        filename = f"YoursBuddy_{clean_kw}_Leads_{today}_{uid}.xlsx"
+    else:
+        filename = f"YoursBuddy_Podcast_Host_Research_{today}_{uid}.xlsx"
+
     target_path = (settings.exports_dir / filename).resolve()
     wb.save(str(target_path))
 
@@ -304,7 +322,24 @@ def generate_csv_export(
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     uid = uuid.uuid4().hex[:6]
-    filename = f"YoursBuddy_Podcast_Host_Research_{today}_{uid}.csv"
+
+    kw_target = f.get("keyword") or f.get("search")
+    if not kw_target and f.get("research_task_id"):
+        try:
+            from app.db.models import ResearchTask
+            t = db.query(ResearchTask).filter(ResearchTask.id == int(f["research_task_id"])).first()
+            if t and t.search_keyword:
+                kw_target = t.search_keyword
+        except Exception:
+            pass
+
+    if kw_target and str(kw_target).strip() and str(kw_target).lower() not in ("all", "all leads", "default", "none"):
+        clean_kw = "".join(c if c.isalnum() else "_" for c in str(kw_target).strip()).strip("_")[:35]
+        clean_kw = "_".join(part for part in clean_kw.split("_") if part)
+        filename = f"YoursBuddy_{clean_kw}_Leads_{today}_{uid}.csv"
+    else:
+        filename = f"YoursBuddy_Podcast_Host_Research_{today}_{uid}.csv"
+
     target_path = (settings.exports_dir / filename).resolve()
 
     with Path(target_path).open("w", newline="", encoding="utf-8-sig") as fp:

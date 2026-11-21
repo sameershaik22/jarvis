@@ -38,6 +38,7 @@ def _build_lead_dict(
     host: Person | None,
     company: Company | None,
     contact: Contact | None,
+    search_keyword: str | None = None,
 ) -> dict[str, Any]:
     source_type = None
     source_url = None
@@ -94,8 +95,11 @@ def _build_lead_dict(
     if contact and contact.email_category == "channel_inquiry" and contact_status == "Verified":
         contact_status = "Unverified"
 
+    kw_val = search_keyword or (post.keywords_matched[0] if (post and post.keywords_matched) else "General")
+
     return {
         "lead_id": lead_id,
+        "search_keyword": kw_val,
         "linkedin_post_id": post.id if post else None,
         "podcast_id": podcast.id if podcast else None,
         "host_id": host.id if (host and valid_host_name) else None,
@@ -178,6 +182,14 @@ def query_research_leads(
     records: list[dict[str, Any]] = []
     seen_podcast_ids: set[int] = set()
 
+    task_map: dict[int, str] = {}
+    try:
+        from app.db.models import ResearchTask
+        tasks = db.query(ResearchTask.id, ResearchTask.search_keyword).filter(ResearchTask.agency_id == agency_id).all()
+        task_map = {t.id: t.search_keyword for t in tasks}
+    except Exception:
+        pass
+
     for post in posts:
         podcast = post.podcast
         if podcast:
@@ -196,7 +208,7 @@ def query_research_leads(
             with_email = [c for c in host.contacts if c.email]
             contact = with_email[0] if with_email else host.contacts[0]
 
-        records.append(_build_lead_dict(podcast, post, qa, host, comp, contact))
+        records.append(_build_lead_dict(podcast, post, qa, host, comp, contact, search_keyword=task_map.get(post.research_task_id) if post else None))
 
     # Also include standalone podcasts that weren't attached to a LinkedinPost (if any)
     standalone_podcasts = (
@@ -274,7 +286,7 @@ def query_research_leads(
             q = search.lower()
             hay = " ".join(
                 str(r.get(k) or "")
-                for k in ("podcast_name", "episode_title", "host_full_name", "host_company", "business_email")
+                for k in ("podcast_name", "episode_title", "host_full_name", "host_company", "business_email", "search_keyword")
             ).lower()
             if q not in hay:
                 continue

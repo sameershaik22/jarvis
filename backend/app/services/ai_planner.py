@@ -51,6 +51,59 @@ def _call_gemini_sync(
     return None
 
 
+def extract_keyword_from_text(command: str) -> str:
+    """Extract targeted podcast topic, niche, or role from user command with smart normalization."""
+    import re
+
+    cleaned = command.strip()
+
+    # 1. Strip leading action triggers
+    lead_patterns = [
+        r"^(?:can\s+you\s+)?(?:please\s+)?(?:search|find|look\s+for|research|discover|scrape|get|show\s+me)\s+(?:for\s+)?(?:me\s+)?",
+        r"^(?:start\s+automation\s+for|automate\s+search\s+for|run\s+research\s+on)\s+",
+        r"^(?:i\s+want\s+to\s+search\s+for|i\s+need\s+to\s+search\s+for|i\s+want\s+to\s+find|i\s+want)\s+",
+        r"^(?:can\s+you\s+please\s+find|can\s+you\s+find)\s+",
+    ]
+    for pat in lead_patterns:
+        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
+
+    # 2. Strip trailing boilerplates
+    trail_patterns = [
+        r"\s+(?:and\s+)?show\s+me\s+what\s+results\s+(?:is\s+it\s+giving|it\s+gives|are\s+there).*$",
+        r"\s+(?:and\s+)?show\s+me\s+results.*$",
+        r"\s+(?:and\s+)?show\s+me.*$",
+        r"\s+for\s+me.*$",
+        r"\s+type\s+this.*$",
+        r"\s+(?:and\s+)?(?:locate|find)\s+(?:their\s+)?(?:business\s+)?(?:emails?|contacts?).*$",
+        r"\s+(?:and\s+)?(?:identify|extract)\s+hosts?.*$",
+        r"\s+prioritize\s+recent\s+video\s+posts.*$",
+        r"\s+and\s+search.*$",
+        r"\s+hosts?\s+and\s+emails?.*$",
+        r"\s+hosts?.*$",
+    ]
+    for pat in trail_patterns:
+        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
+
+    cleaned = cleaned.strip(" ,.?!:;\"\'")
+    if not cleaned:
+        return "Real Estate Podcast"
+
+    if "podcast" not in cleaned.lower() and "show" not in cleaned.lower():
+        cleaned = f"{cleaned} Podcast"
+
+    words = cleaned.split()
+    capitalized = []
+    for w in words:
+        w_lower = w.lower()
+        if w_lower in ("saas", "ai", "b2b", "b2c", "cto", "ceo", "cmo", "vc", "cre", "it", "llm", "hr"):
+            capitalized.append(w.upper())
+        elif w_lower in ("and", "or", "for", "of", "in", "on", "with", "the", "to", "by"):
+            capitalized.append(w_lower)
+        else:
+            capitalized.append(w.capitalize())
+    return " ".join(capitalized)
+
+
 class AIPlanner:
     """Multi-provider AI planner supporting OpenAI GPT-4o and Google Gemini with deterministic fallback."""
 
@@ -89,13 +142,23 @@ class AIPlanner:
             elif "qualified" in lower:
                 preset = "qualified"
             days = 7 if ("7 day" in lower or "seven day" in lower or "last week" in lower) else None
+
+            # Extract target keyword if user asked to export a specific topic (e.g. "export SaaS podcast leads")
+            kw_clean = extract_keyword_from_text(command)
+            kw_target = None
+            if kw_clean and kw_clean.lower() not in (
+                "excel podcast", "csv podcast", "export podcast", "leads podcast", "download podcast",
+                "all podcast", "verified podcast"
+            ):
+                kw_target = kw_clean
+
             return {
                 "intent": "export_leads",
                 "format": fmt,
                 "preset": preset,
                 "last_days": days,
-                "keyword": None,
-                "summary": f"Prepare {fmt.upper()} export ({preset}).",
+                "keyword": kw_target,
+                "summary": f"Prepare {fmt.upper()} export ({preset}){f' for {kw_target}' if kw_target else ''}.",
             }
 
         # Deterministic fast-path for stop / pause / resume commands
@@ -119,10 +182,11 @@ class AIPlanner:
             }
 
         prompt = (
-            "You are the planning engine for YoursBuddy AI, a browser-based podcast-host research assistant. "
-            "Classify the user's command into JSON with fields: "
+            "You are the planning engine for YoursBuddy AI, an autonomous podcast-host research assistant. "
+            "Extract the user's intent and specific target topic/role/niche. "
+            "Return valid JSON with keys: "
             "intent (start_research | verify_host | check_youtube_email | show_research_summary | export_leads | pause_research | resume_research | stop_research | out_of_scope), "
-            "keyword (string, default 'Real Estate Podcast'), "
+            "keyword (the specific podcast topic/niche/role extracted from command, e.g. 'SaaS Podcast and Tech Podcast', 'AI Podcast', 'Fintech Podcast', or 'Real Estate Podcast' if no topic specified), "
             "max_posts (int 1..25, default 10), "
             "target_name (string or null), "
             "summary (short human-readable plan). "
@@ -161,14 +225,8 @@ class AIPlanner:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("OpenAI intent parsing fallback due to error: %s", exc)
 
-        # Deterministic research command fallback
-        keyword = "Real Estate Podcast"
-        if "commercial real estate" in lower:
-            keyword = "Commercial Real Estate Podcast"
-        elif "multifamily" in lower:
-            keyword = "Multifamily Real Estate Podcast"
-        elif "real estate investing" in lower:
-            keyword = "Real Estate Investing Podcast"
+        # Deterministic research command fallback: dynamically extract keyword/niche from user command
+        keyword = extract_keyword_from_text(command)
 
         return {
             "intent": "start_research",

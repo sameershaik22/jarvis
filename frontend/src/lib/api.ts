@@ -151,8 +151,9 @@ export async function downloadExportFile(
   format: "excel" | "csv",
   filters: ExportFiltersPayload = {}
 ): Promise<{ filename: string; recordCount: number }> {
+  const base = getApiBase();
   const endpoint = format === "excel" ? "/api/v1/export/excel" : "/api/v1/export/csv";
-  const res = await fetch(`${API_BASE}${endpoint}`, {
+  const res = await fetch(`${base}${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(filters),

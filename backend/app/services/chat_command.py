@@ -72,7 +72,11 @@ async def handle_jarvis_command(db: Session, command: str, agency_id: str = "def
         fmt = parsed.get("format", "xlsx")
         preset = parsed.get("preset", "all")
         last_days = parsed.get("last_days")
+        target_kw = parsed.get("keyword")
         filters: dict[str, Any] = {"preset": preset}
+        if target_kw and target_kw.lower() not in ("all", "default", "none"):
+            filters["search"] = target_kw
+            filters["keyword"] = target_kw
         if last_days:
             dt_from = (datetime.now(timezone.utc) - timedelta(days=int(last_days))).strftime("%Y-%m-%d")
             filters["date_from"] = dt_from
@@ -85,7 +89,7 @@ async def handle_jarvis_command(db: Session, command: str, agency_id: str = "def
         dl_url = f"/api/v1/export/download/{log.id}"
         reply = (
             f"Generated {fmt.upper()} export '{log.filename}' with {log.record_count} lead record(s) "
-            f"(preset: {preset}). Ready for download."
+            f"(preset: {preset}{f', keyword: {target_kw}' if target_kw else ''}). Ready for download."
         )
         db.add(
             AgentMessage(
@@ -137,8 +141,8 @@ async def handle_jarvis_command(db: Session, command: str, agency_id: str = "def
     )
     reply = (
         f"Started research task #{task.id} for '{task.search_keyword}'. "
-        f"I will navigate LinkedIn Posts -> Latest -> Videos, evaluate video quality, locate original podcast channels, "
-        f"research podcast hosts and companies, and search LinkedIn -> YouTube About -> Apollo for business emails."
+        f"I will navigate YouTube & LinkedIn for '{task.search_keyword}', evaluate video quality, locate original podcast channels, "
+        f"research podcast hosts and companies, and search LinkedIn -> YouTube About -> Apollo for verified business emails."
     )
     db.add(
         AgentMessage(

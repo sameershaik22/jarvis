@@ -150,7 +150,9 @@ function renderBrowserBadge(status?: string, isActive?: boolean, bridgeConnected
 }
 
 const SAMPLE_PROMPTS = [
+  "Search SaaS Podcast and tech podcast for me and show me what results is it giving",
   "Find professional real estate podcasts on LinkedIn, prioritize recent video posts, identify hosts, find original channels, and locate business emails.",
+  "Search AI startup podcasts, identify hosts, and locate business emails.",
   "Show me the research completed so far.",
   "Export all verified podcast leads to Excel.",
   "Download only leads with business emails.",
@@ -391,7 +393,7 @@ export default function AgentWorkspacePage() {
         <div className="rounded-xl bg-slate-900/80 border border-slate-800 p-4 space-y-2">
           <div className="text-xs uppercase tracking-wider text-slate-400">Continuous Task Status</div>
           <div className="flex items-center justify-between">
-            <span className="font-semibold text-white truncate max-w-[200px]">
+            <span className="font-semibold text-white truncate max-w-[280px]">
               {status?.agent_state === "running" && task
                 ? `#${task.id} — ${task.search_keyword}`
                 : "Standby — ready for instruction"}
