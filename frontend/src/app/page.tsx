@@ -169,7 +169,7 @@ export default function AgentWorkspacePage() {
 
   const inFlightRef = useRef(false);
   const lastShotRef = useRef(0);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const loadStatus = useCallback(async () => {
     if (inFlightRef.current) return;
@@ -220,8 +220,10 @@ export default function AgentWorkspacePage() {
   }, [loadStatus]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [status?.messages, pendingUserMsg]);
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [status?.messages?.length, pendingUserMsg]);
 
   async function sendCommand(text?: string) {
     const payload = (text ?? command).trim();
@@ -544,7 +546,7 @@ export default function AgentWorkspacePage() {
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3">
             {(!status?.messages || status.messages.length === 0) && (
               <div className="text-sm text-slate-400 space-y-3">
                 <p>Click &quot;Start Research&quot; or choose an instruction prompt below:</p>
@@ -597,7 +599,6 @@ export default function AgentWorkspacePage() {
                 </div>
               </>
             )}
-            <div ref={messagesEndRef} />
           </div>
 
           <form
