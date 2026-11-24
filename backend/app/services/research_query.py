@@ -160,6 +160,7 @@ def query_research_leads(
     selected_ids: list[int] | None = None,
     search: str | None = None,
     agency_id: str = "default",
+    filter_incomplete: bool = False,
 ) -> list[dict[str, Any]]:
     """Query joined research lead records directly from PostgreSQL/SQLAlchemy."""
     posts = (
@@ -208,7 +209,13 @@ def query_research_leads(
             with_email = [c for c in host.contacts if c.email]
             contact = with_email[0] if with_email else host.contacts[0]
 
-        records.append(_build_lead_dict(podcast, post, qa, host, comp, contact, search_keyword=task_map.get(post.research_task_id) if post else None))
+        lead = _build_lead_dict(podcast, post, qa, host, comp, contact, search_keyword=task_map.get(post.research_task_id) if post else None)
+        if filter_incomplete:
+            has_host = bool(lead.get("host_full_name"))
+            has_email = bool(lead.get("business_email"))
+            if not has_host and not has_email:
+                continue
+        records.append(lead)
 
     # Also include standalone podcasts that weren't attached to a LinkedinPost (if any)
     standalone_podcasts = (

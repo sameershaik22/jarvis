@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import tempfile
+
+# Force test environment and local SQLite database BEFORE any app imports
+os.environ["ENVIRONMENT"] = "test"
+os.environ["DATABASE_URL"] = f"sqlite:///{Path(tempfile.gettempdir()).resolve().as_posix()}/test_yoursbuddy.sqlite3"
+os.environ["BROWSER_HEADLESS"] = "true"
 
 import httpx
 import pytest

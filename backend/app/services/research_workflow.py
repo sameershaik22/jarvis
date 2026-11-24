@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -114,12 +115,25 @@ def generate_search_keyword_variations(primary_keyword: str) -> list[str]:
     return results[:8]
 
 
+@dataclass
+class TaskExecutionContext:
+    task_id: int
+    search_keyword: str
+    agency_id: str = "default"
+    bg_task: asyncio.Task[None] | None = None
+    resume_event: asyncio.Event = field(default_factory=asyncio.Event)
+    stop_requested: bool = False
+    status: str = "running"
+
+
 class ResearchWorkflowManager:
     """Orchestrates Jarvis-like autonomous browser research with pause/resume/stop & checkpoints."""
 
     def __init__(self, browser: BrowserController | None = None) -> None:
         self.browser = browser or browser_controller
         self.events = LiveEventBus()
+        self._active_tasks: dict[int, TaskExecutionContext] = {}
+        self._latest_task_id: int | None = None
         self._active_task_id: int | None = None
         self._bg_task: asyncio.Task[None] | None = None
         self._resume_event = asyncio.Event()
@@ -129,11 +143,18 @@ class ResearchWorkflowManager:
 
     @property
     def agent_state(self) -> str:
+        if any(t.status == "running" for t in self._active_tasks.values()):
+            return "running"
+        if any(t.status == "paused" for t in self._active_tasks.values()):
+            return "paused"
         return self._agent_state
 
     @property
     def active_task_id(self) -> int | None:
-        return self._active_task_id
+        for t in reversed(list(self._active_tasks.values())):
+            if t.status == "running":
+                return t.task_id
+        return self._latest_task_id or self._active_task_id
 
     async def _log(
         self,
@@ -198,11 +219,18 @@ class ResearchWorkflowManager:
         finally:
             db.close()
 
-    async def _wait_if_paused(self, task_id: int) -> bool:
+    async def _wait_if_paused(self, task_id: int, ctx: TaskExecutionContext | None = None) -> bool:
         """Returns False if stop was requested while paused."""
-        if self._stop_requested:
+        if ctx is None:
+            ctx = self._active_tasks.get(task_id)
+        is_stopped = (ctx.stop_requested if ctx else False) or self._stop_requested
+        if is_stopped:
             return False
-        if not self._resume_event.is_set():
+
+        resume_evt = ctx.resume_event if ctx else self._resume_event
+        if not resume_evt.is_set():
+            if ctx:
+                ctx.status = "paused"
             self._agent_state = "paused"
             db = SessionLocal()
             try:
@@ -217,13 +245,13 @@ class ResearchWorkflowManager:
                 task_id,
                 "paused",
                 "wait",
-                "Research paused: waiting for authentication. Please log in to LinkedIn in the opened Chrome window. (Agent will auto-resume once login is detected, or click Resume).",
+                "Research paused: waiting for authentication or user resume. (Click Resume to continue).",
             )
 
             # Wait loop: checks for user Resume click, Stop click, or auto-detects login completion
-            while not self._resume_event.is_set() and not self._stop_requested:
+            while not resume_evt.is_set() and not ((ctx.stop_requested if ctx else False) or self._stop_requested):
                 try:
-                    await asyncio.wait_for(self._resume_event.wait(), timeout=3.0)
+                    await asyncio.wait_for(resume_evt.wait(), timeout=3.0)
                     break
                 except asyncio.TimeoutError:
                     try:
@@ -235,12 +263,15 @@ class ResearchWorkflowManager:
                                 "authenticated",
                                 "LinkedIn login detected! Resuming research automatically...",
                             )
-                            self._resume_event.set()
+                            resume_evt.set()
                             break
                     except Exception:  # noqa: BLE001
                         pass
 
-            if not self._stop_requested:
+            curr_stopped = (ctx.stop_requested if ctx else False) or self._stop_requested
+            if not curr_stopped:
+                if ctx:
+                    ctx.status = "running"
                 self._agent_state = "running"
                 db = SessionLocal()
                 try:
@@ -251,7 +282,7 @@ class ResearchWorkflowManager:
                 finally:
                     db.close()
                 await self._log(task_id, "resumed", "resume", "Resuming research from saved checkpoint.")
-        return not self._stop_requested
+        return not ((ctx.stop_requested if ctx else False) or self._stop_requested)
 
     async def start_task(
         self,
@@ -287,62 +318,149 @@ class ResearchWorkflowManager:
         finally:
             db.close()
 
-        self._stop_requested = False
-        self._resume_event.set()
+        ctx = TaskExecutionContext(
+            task_id=task_id,
+            search_keyword=keyword,
+            agency_id=agency_id,
+            stop_requested=False,
+            status="running",
+        )
+        ctx.resume_event.set()
+        self._active_tasks[task_id] = ctx
+        self._latest_task_id = task_id
         self._active_task_id = task_id
+        self._stop_requested = False
         self._agent_state = "running"
 
-        self._bg_task = asyncio.create_task(self._execute_task(task_id, use_browser=use_browser))
+        bg = asyncio.create_task(self._execute_task(task_id, use_browser=use_browser, ctx=ctx))
+        ctx.bg_task = bg
+        self._bg_task = bg
         return task
 
-    async def pause_task(self) -> bool:
-        if self._active_task_id is None or self._agent_state not in ("running",):
+    async def pause_task(self, task_id: int | None = None) -> bool:
+        if task_id is not None:
+            ctx = self._active_tasks.get(task_id)
+            if ctx and ctx.status == "running":
+                ctx.resume_event.clear()
+                ctx.status = "paused"
+                db = SessionLocal()
+                try:
+                    t = db.query(ResearchTask).filter(ResearchTask.id == task_id).first()
+                    if t:
+                        t.task_status = "paused"
+                        db.commit()
+                finally:
+                    db.close()
+                await self._log(task_id, "paused", "pause", f"Task #{task_id} paused.")
+                return True
             return False
-        self._resume_event.clear()
-        self._agent_state = "paused"
-        db = SessionLocal()
-        try:
-            t = db.query(ResearchTask).filter(ResearchTask.id == self._active_task_id).first()
-            if t:
-                t.task_status = "paused"
-                db.commit()
-        finally:
-            db.close()
-        await self._log(self._active_task_id, "paused", "pause", "Task paused.")
-        return True
 
-    async def resume_task(self) -> bool:
-        if self._active_task_id is None:
-            return False
-        db = SessionLocal()
-        try:
-            t = db.query(ResearchTask).filter(ResearchTask.id == self._active_task_id).first()
-            if t:
-                t.task_status = "running"
-                db.commit()
-        finally:
-            db.close()
-        self._agent_state = "running"
-        self._resume_event.set()
-        return True
+        paused_any = False
+        for tid, ctx in list(self._active_tasks.items()):
+            if ctx.status == "running":
+                ctx.resume_event.clear()
+                ctx.status = "paused"
+                paused_any = True
+                db = SessionLocal()
+                try:
+                    t = db.query(ResearchTask).filter(ResearchTask.id == tid).first()
+                    if t:
+                        t.task_status = "paused"
+                        db.commit()
+                finally:
+                    db.close()
+                await self._log(tid, "paused", "pause", f"Task #{tid} paused.")
+        if paused_any:
+            self._resume_event.clear()
+            self._agent_state = "paused"
+        elif self._active_task_id is not None:
+            self._resume_event.clear()
+            self._agent_state = "paused"
+            return True
+        return paused_any
 
-    async def stop_task(self) -> bool:
-        if self._active_task_id is None:
+    async def resume_task(self, task_id: int | None = None) -> bool:
+        if task_id is not None:
+            ctx = self._active_tasks.get(task_id)
+            if ctx and ctx.status == "paused":
+                ctx.status = "running"
+                ctx.resume_event.set()
+                db = SessionLocal()
+                try:
+                    t = db.query(ResearchTask).filter(ResearchTask.id == task_id).first()
+                    if t:
+                        t.task_status = "running"
+                        db.commit()
+                finally:
+                    db.close()
+                await self._log(task_id, "resumed", "resume", f"Task #{task_id} resumed.")
+                return True
             return False
+
+        resumed_any = False
+        for tid, ctx in list(self._active_tasks.items()):
+            if ctx.status == "paused":
+                ctx.status = "running"
+                ctx.resume_event.set()
+                resumed_any = True
+                db = SessionLocal()
+                try:
+                    t = db.query(ResearchTask).filter(ResearchTask.id == tid).first()
+                    if t:
+                        t.task_status = "running"
+                        db.commit()
+                finally:
+                    db.close()
+                await self._log(tid, "resumed", "resume", f"Task #{tid} resumed.")
+        if resumed_any:
+            self._resume_event.set()
+            self._agent_state = "running"
+        elif self._active_task_id is not None:
+            self._resume_event.set()
+            self._agent_state = "running"
+            return True
+        return resumed_any
+
+    async def stop_task(self, task_id: int | None = None) -> bool:
+        if task_id is not None:
+            ctx = self._active_tasks.get(task_id)
+            if ctx:
+                ctx.stop_requested = True
+                ctx.status = "stopped"
+                ctx.resume_event.set()
+                db = SessionLocal()
+                try:
+                    t = db.query(ResearchTask).filter(ResearchTask.id == task_id).first()
+                    if t:
+                        t.task_status = "stopped"
+                        t.completed_at = datetime.now(timezone.utc)
+                        db.commit()
+                finally:
+                    db.close()
+                await self._log(task_id, "stopped", "stop", f"Task #{task_id} stopped by user.")
+                return True
+            return False
+
+        stopped_any = False
         self._stop_requested = True
-        self._agent_state = "stopping"
         self._resume_event.set()
-        db = SessionLocal()
-        try:
-            t = db.query(ResearchTask).filter(ResearchTask.id == self._active_task_id).first()
-            if t:
-                t.task_status = "stopped"
-                t.completed_at = datetime.now(timezone.utc)
-                db.commit()
-        finally:
-            db.close()
-        await self._log(self._active_task_id, "stopped", "stop", "Stop requested by user.")
-        return True
+        for tid, ctx in list(self._active_tasks.items()):
+            ctx.stop_requested = True
+            ctx.status = "stopped"
+            ctx.resume_event.set()
+            stopped_any = True
+            db = SessionLocal()
+            try:
+                t = db.query(ResearchTask).filter(ResearchTask.id == tid).first()
+                if t:
+                    t.task_status = "stopped"
+                    t.completed_at = datetime.now(timezone.utc)
+                    db.commit()
+            finally:
+                db.close()
+            await self._log(tid, "stopped", "stop", f"Task #{tid} stopped by user.")
+        self._agent_state = "idle"
+        return stopped_any or (self._active_task_id is not None)
 
     async def process_single_post(
         self,
@@ -356,9 +474,10 @@ class ResearchWorkflowManager:
         allow_live_browser: bool = True,
         agency_id: str = "default",
         browser: Any = None,
+        stop_requested: bool = False,
     ) -> dict[str, Any]:
         """Execute Modules 3 -> 8 for a single discovered podcast post."""
-        if self._stop_requested:
+        if self._stop_requested or stop_requested:
             return {"status": "Stopped", "is_new": False}
         active_b = browser or self.browser
         post, is_new = upsert_linkedin_post(db, task_id, post_data, agency_id=agency_id)
@@ -571,7 +690,13 @@ class ResearchWorkflowManager:
             "email": primary_contact.email if primary_contact else None,
         }
 
-    async def _execute_task(self, task_id: int, use_browser: bool = True) -> None:
+    async def _execute_task(self, task_id: int, use_browser: bool = True, ctx: TaskExecutionContext | None = None) -> None:
+        if ctx is None:
+            ctx = self._active_tasks.get(task_id)
+
+        def is_stop() -> bool:
+            return (ctx.stop_requested if ctx else False) or self._stop_requested
+
         db = SessionLocal()
         try:
             task = db.query(ResearchTask).filter(ResearchTask.id == task_id).first()
@@ -592,31 +717,32 @@ class ResearchWorkflowManager:
 
             if use_browser:
                 agency_session = browser_manager.get_session(agency_id)
-                active_browser = agency_session if agency_session.is_local_connected else self.browser
+                active_browser = agency_session if agency_session.is_local_connected else None
                 browser_started = False
                 info: dict[str, Any] = {}
-                try:
-                    info = await active_browser.start()
-                    browser_started = bool(info.get("started", True) and getattr(active_browser, "is_active", False))
-                except Exception as b_exc:
-                    logger.warning("Browser startup notice: %s", b_exc)
-                    browser_started = False
+                if active_browser is not None:
+                    try:
+                        info = await active_browser.start()
+                        browser_started = bool(info.get("started", True) and getattr(active_browser, "is_active", False))
+                    except Exception as b_exc:
+                        logger.warning("Browser startup notice: %s", b_exc)
+                        browser_started = False
 
                 if browser_started:
                     await self._log(
                         task_id,
                         "browser_ready",
                         "launch",
-                        f"Browser active ({info.get('channel')}). Navigating to LinkedIn search.",
+                        f"Local desktop Chrome active. Navigating research tabs.",
                         url=info.get("url"),
                         progress=10,
                     )
                 else:
                     await self._log(
                         task_id,
-                        "browser_notice",
-                        "fallback",
-                        "Desktop Chrome bridge agent offline. Operating in Cloud Discovery Mode (Tavily + YouTube public data). Run start_agent.bat on your PC to automate your desktop Chrome.",
+                        "cloud_research",
+                        "cloud_start",
+                        f"Cloud AI Research Engine active (Zero-Browser RAM Mode). Researching '{keyword}' via Tavily, YouTube API & Gemini.",
                         url=None,
                         progress=10,
                     )
@@ -628,7 +754,7 @@ class ResearchWorkflowManager:
                 total_processed = 0
                 cycle = 0
 
-                while not self._stop_requested:
+                while not is_stop():
                     current_kw = SEARCH_KEYWORDS[cycle % len(SEARCH_KEYWORDS)]
                     cycle += 1
                     batch_candidates: list[dict[str, Any]] = []
@@ -700,7 +826,7 @@ class ResearchWorkflowManager:
                                 )
                             elif li_nav.success:
                                 for scroll_idx in range(2):
-                                    if self._stop_requested or not await self._wait_if_paused(task_id):
+                                    if is_stop() or not await self._wait_if_paused(task_id, ctx):
                                         break
                                     html = await active_browser.get_html()
                                     parsed = parse_linkedin_posts_from_html(html, keyword=current_kw)
@@ -713,7 +839,7 @@ class ResearchWorkflowManager:
                             logger.warning("LinkedIn search step encountered error: %s", li_err)
 
                     # 3. Augmented discovery via Tavily if candidates are low
-                    if len(batch_candidates) < 3 and not self._stop_requested:
+                    if len(batch_candidates) < 3 and not is_stop():
                         try:
                             from app.services.tavily_search import search_tavily
                             t_res = await search_tavily(f'"{current_kw}" podcast youtube channel host', max_results=6)
@@ -752,7 +878,7 @@ class ResearchWorkflowManager:
                     # 4. Process each discovered podcast/channel with resilient skip-on-error logic
                     # Never gets stuck on one channel; if fetching fails, logs and proceeds to next channel!
                     for candidate in batch_candidates:
-                        if self._stop_requested or not await self._wait_if_paused(task_id):
+                        if is_stop() or not await self._wait_if_paused(task_id, ctx):
                             break
 
                         total_processed += 1
@@ -775,21 +901,32 @@ class ResearchWorkflowManager:
                                 task_id=task_id,
                                 post_data=candidate,
                                 quality_threshold=threshold,
-                                allow_live_browser=True,
+                                allow_live_browser=bool(browser_started),
                                 agency_id=agency_id,
                                 browser=active_browser,
+                                stop_requested=is_stop(),
                             )
-                            lead_name = res.get("host_name") or channel_name
-                            lead_email = res.get("email") or "Searching..."
+                            lead_name = res.get("host_name")
+                            lead_email = res.get("email")
                             status_val = res.get("status") or "Processed"
-                            await self._log(
-                                task_id,
-                                "next_channel",
-                                "continue",
-                                f"Saved podcast '{lead_name}' (Status: {status_val}, Email: {lead_email}) to PostgreSQL. Advancing to next channel...",
-                                url=target_url,
-                                progress=min(95, 28 + (total_processed % 35) * 2),
-                            )
+                            if not lead_name and not lead_email:
+                                await self._log(
+                                    task_id,
+                                    "filter_incomplete",
+                                    "skip",
+                                    f"Candidate '{channel_name}' has incomplete data (no host or email). Filtered out. Advancing...",
+                                    url=target_url,
+                                    progress=min(95, 28 + (total_processed % 35) * 2),
+                                )
+                            else:
+                                await self._log(
+                                    task_id,
+                                    "next_channel",
+                                    "continue",
+                                    f"Retrieved lead '{lead_name or channel_name}' (Status: {status_val}, Email: {lead_email or 'Not public'}). Saved to PostgreSQL.",
+                                    url=target_url,
+                                    progress=min(95, 28 + (total_processed % 35) * 2),
+                                )
                         except Exception as exc:
                             logger.warning("Error processing channel '%s': %s", channel_name, exc)
                             await self._log(
@@ -811,7 +948,7 @@ class ResearchWorkflowManager:
                             pass
 
                     # Pause briefly before next cycle
-                    if self._stop_requested:
+                    if is_stop():
                         break
                     await asyncio.sleep(2)
 
@@ -820,7 +957,7 @@ class ResearchWorkflowManager:
             try:
                 t = db_done.query(ResearchTask).filter(ResearchTask.id == task_id).first()
                 if t:
-                    if self._stop_requested:
+                    if is_stop():
                         t.task_status = "stopped"
                         t.current_stage = "stopped"
                         t.progress = min(t.progress or 0, 95)
@@ -831,12 +968,13 @@ class ResearchWorkflowManager:
                         t.progress = 100
                         t.completed_at = datetime.now(timezone.utc)
                     final_stats = compute_dashboard_statistics(db_done, agency_id=agency_id)
-                    action_word = "stopped" if self._stop_requested else "completed"
+                    action_word = "stopped" if is_stop() else "completed"
                     summary_msg = (
-                        f"Research session {action_word}. Total collected in PostgreSQL: "
-                        f"{final_stats['qualified_podcasts']} qualified podcast(s), "
-                        f"{final_stats['hosts_identified']} host(s), and "
-                        f"{final_stats['emails_discovered']} email contact(s)."
+                        f"Research session {action_word} as per your instructions for '{keyword}'. "
+                        f"Retrieved: {final_stats['qualified_podcasts']} qualified podcast(s), "
+                        f"{final_stats['hosts_identified']} verified host(s), and "
+                        f"{final_stats['emails_discovered']} business email contact(s). "
+                        f"(Incomplete or half-retrieved records were safely filtered out)."
                     )
                     db_done.add(
                         AgentMessage(
@@ -851,8 +989,7 @@ class ResearchWorkflowManager:
             finally:
                 db_done.close()
 
-            self._agent_state = "idle"
-            if self._stop_requested:
+            if is_stop():
                 await self._log(task_id, "stopped", "stop", "Research session stopped by user.")
             else:
                 await self._log(task_id, "completed", "done", "Research workflow finished. All data saved to PostgreSQL.", progress=100)
@@ -871,7 +1008,6 @@ class ResearchWorkflowManager:
 
         except Exception as exc:  # noqa: BLE001
             logger.exception("Research task %s failed", task_id)
-            self._agent_state = "error"
             db_err = SessionLocal()
             try:
                 t = db_err.query(ResearchTask).filter(ResearchTask.id == task_id).first()
@@ -883,6 +1019,12 @@ class ResearchWorkflowManager:
             finally:
                 db_err.close()
             await self._log(task_id, "error", "exception", f"Task failed: {exc}", level="ERROR")
+        finally:
+            if ctx:
+                ctx.status = "stopped" if is_stop() else "completed"
+            self._active_tasks.pop(task_id, None)
+            if not any(t.status == "running" for t in self._active_tasks.values()):
+                self._agent_state = "idle"
 
 
 workflow_manager = ResearchWorkflowManager()

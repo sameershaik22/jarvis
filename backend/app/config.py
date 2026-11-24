@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     )
     quality_threshold: int = Field(default=65, alias="QUALITY_THRESHOLD")
     max_posts_per_run: int = Field(default=10, alias="MAX_POSTS_PER_RUN")
+    company_access_key: str = Field(
+        default="YoursBuddy2026", alias="COMPANY_ACCESS_KEY"
+    )
 
     # Optional n8n Cloud webhook integration
     n8n_webhook_url: Optional[str] = Field(default=None, alias="N8N_WEBHOOK_URL")

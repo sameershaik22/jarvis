@@ -42,10 +42,24 @@ export function setActiveAgencyId(agencyId: string): void {
   }
 }
 
+export function getCompanyKey(): string {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("yoursbuddy_company_key")?.trim() || "";
+  }
+  return "";
+}
+
+export function setCompanyKey(key: string): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem("yoursbuddy_company_key", key.trim());
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const base = getApiBase();
   const targetUrl = `${base}${path.startsWith("/") ? path : `/${path}`}`;
   const agencyId = getActiveAgencyId();
+  const companyKey = getCompanyKey();
 
   let res: Response;
   try {
@@ -54,6 +68,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       headers: {
         "Content-Type": "application/json",
         "X-Agency-Id": agencyId,
+        ...(companyKey ? { "X-Company-Key": companyKey } : {}),
         ...(init?.headers || {}),
       },
       cache: "no-store",

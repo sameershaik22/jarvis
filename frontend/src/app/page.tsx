@@ -142,9 +142,9 @@ function renderBrowserBadge(status?: string, isActive?: boolean, bridgeConnected
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-900 text-slate-400 border border-slate-700">
-      <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-      Local Agent Offline (Run start_agent.bat)
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-cyan-950/70 text-cyan-400 border border-cyan-800/60 shadow-sm">
+      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+      Cloud Research Engine Active
     </span>
   );
 }
@@ -257,7 +257,10 @@ export default function AgentWorkspacePage() {
 
   const task = status?.active_task;
   const stats = status?.stats;
-  const recentLeads = status?.recent_leads || [];
+  const rawLeads = status?.recent_leads || [];
+  const recentLeads = rawLeads.filter(
+    (r) => r.host_full_name || (r.business_email && r.business_email !== "Searching...")
+  );
 
   return (
     <div className="space-y-6 pb-12">
@@ -428,7 +431,7 @@ export default function AgentWorkspacePage() {
         <div className="rounded-xl bg-slate-900/80 border border-slate-800 p-4 space-y-3 lg:col-span-2">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
             <div className="text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-cyan-400" /> Active Chrome Browser (Desktop CDP)
+              <Globe className="w-3.5 h-3.5 text-cyan-400" /> {status?.bridge_connected ? "Desktop Chrome Connected (CDP)" : "Cloud AI Research Engine"}
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -437,7 +440,7 @@ export default function AgentWorkspacePage() {
                 className="text-[11px] px-2.5 py-1 rounded border border-cyan-800/70 bg-cyan-950/50 text-cyan-300 hover:bg-cyan-900/60 cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
               >
                 <Laptop className="w-3.5 h-3.5" />
-                {status?.bridge_connected ? "Bridge Settings" : "Connect Local PC"}
+                {status?.bridge_connected ? "Bridge Settings" : "Local PC (Optional)"}
               </button>
               {renderBrowserBadge(status?.browser_status, status?.browser_active, status?.bridge_connected, status?.device_name)}
             </div>
@@ -445,7 +448,7 @@ export default function AgentWorkspacePage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="truncate text-xs text-cyan-300 font-mono flex-1 min-w-[200px]">
-              {status?.current_url || "Chrome Standby — Ready. Click 'Start Research' or enter a chat command to begin."}
+              {status?.current_url || "Cloud AI Engine Standby — Ready. Send a command or click 'Start Research' to begin."}
             </div>
           </div>
 
@@ -455,7 +458,7 @@ export default function AgentWorkspacePage() {
             </div>
             <div className="text-[11px] text-slate-400 flex items-center gap-3">
               <span>Workspace: <strong className="text-cyan-300 font-mono">{status?.agency_id || "default"}</strong></span>
-              <span>Desktop Chrome: <code className="text-cyan-300 font-mono">127.0.0.1:9222</code></span>
+              <span>Mode: <code className="text-cyan-300 font-mono">{status?.bridge_connected ? "Desktop CDP (:9222)" : "Cloud Autonomous"}</code></span>
             </div>
           </div>
         </div>
@@ -729,8 +732,10 @@ export default function AgentWorkspacePage() {
                         <span className="font-mono text-xs text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50">
                           {r.business_email}
                         </span>
-                      ) : (
+                      ) : status?.agent_state === "running" ? (
                         <span className="text-xs text-amber-400/80 italic">Searching...</span>
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">Not publicly listed</span>
                       )}
                     </td>
                     <td className="px-4 py-3">

@@ -4,12 +4,29 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
+from app.config import get_settings
 from app.services.browser_controller import browser_controller
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+class CompanyVerifyRequest(BaseModel):
+    key: str
+
+
+@router.post("/company-verify")
+async def verify_company_key(payload: CompanyVerifyRequest) -> dict[str, Any]:
+    """Verify company passphrase to unlock company-wide workspace."""
+    key = (payload.key or "").strip()
+    settings = get_settings()
+    expected = (settings.company_access_key or "YoursBuddy2026").strip()
+    if key == expected:
+        return {"valid": True, "message": "Company workspace verified and unlocked."}
+    return {"valid": False, "message": "Invalid company access key."}
 
 
 @router.get("/status")

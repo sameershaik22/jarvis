@@ -68,21 +68,21 @@ async def start_research(
 
 
 @router.post("/pause")
-async def pause_research(agency_id: str = Depends(get_agency_id)) -> dict[str, bool]:
+async def pause_research(task_id: int | None = None, agency_id: str = Depends(get_agency_id)) -> dict[str, bool]:
     _cached_status_responses.pop(agency_id, None)
-    return {"paused": await workflow_manager.pause_task()}
+    return {"paused": await workflow_manager.pause_task(task_id)}
 
 
 @router.post("/resume")
-async def resume_research(agency_id: str = Depends(get_agency_id)) -> dict[str, bool]:
+async def resume_research(task_id: int | None = None, agency_id: str = Depends(get_agency_id)) -> dict[str, bool]:
     _cached_status_responses.pop(agency_id, None)
-    return {"resumed": await workflow_manager.resume_task()}
+    return {"resumed": await workflow_manager.resume_task(task_id)}
 
 
 @router.post("/stop")
-async def stop_research(agency_id: str = Depends(get_agency_id)) -> dict[str, bool]:
+async def stop_research(task_id: int | None = None, agency_id: str = Depends(get_agency_id)) -> dict[str, bool]:
     _cached_status_responses.pop(agency_id, None)
-    return {"stopped": await workflow_manager.stop_task()}
+    return {"stopped": await workflow_manager.stop_task(task_id)}
 
 
 # High-performance in-memory cache partitioned per tenant/workspace
@@ -187,7 +187,7 @@ async def get_agent_status(
     cached_l = _cached_leads.get(agency_id)
     if not cached_l or (now - cached_l[0]) > 3.5:
         try:
-            leads_val = query_research_leads(db=db, agency_id=agency_id)[:10]
+            leads_val = query_research_leads(db=db, agency_id=agency_id, filter_incomplete=True)[:10]
             _cached_leads[agency_id] = (now, leads_val)
         except Exception:
             leads_val = cached_l[1] if cached_l else []
