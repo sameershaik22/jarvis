@@ -141,6 +141,8 @@ def _build_lead_dict(
         "confidence_score": confidence,
         "manual_review_required": manual_review or (not valid_host_name),
         "research_date": research_dt,
+        "discovered_at": research_dt.isoformat() if hasattr(research_dt, "isoformat") else (str(research_dt) if research_dt else None),
+        "discovered_time": research_dt.strftime("%I:%M %p") if hasattr(research_dt, "strftime") else "Recent",
         "research_notes": " | ".join(notes_parts)[:1500] if notes_parts else None,
     }
 

@@ -147,6 +147,8 @@ async def handle_jarvis_command(db: Session, command: str, agency_id: str = "def
         use_browser=True,
         agency_id=agency_id,
     )
+    from app.api.v1.agent import invalidate_agent_cache
+    invalidate_agent_cache(agency_id)
     reply = (
         f"Started research task #{task.id} for '{task.search_keyword}'. "
         f"I will navigate YouTube & LinkedIn for '{task.search_keyword}', evaluate video quality, locate original podcast channels, "

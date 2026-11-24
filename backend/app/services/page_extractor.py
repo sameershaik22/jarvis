@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
+import logging
 import re
 from typing import Any
 from urllib.parse import parse_qs, quote_plus, urlencode, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
+import httpx
+
+logger = logging.getLogger(__name__)
 
 EMAIL_REGEX = re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b")
 PHONE_REGEX = re.compile(r"(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}")
@@ -250,11 +255,87 @@ def parse_linkedin_posts_from_html(html: str, keyword: str = "Real Estate Podcas
 def parse_youtube_search_results_from_html(html: str) -> list[dict[str, Any]]:
     if not html:
         return []
-    soup = BeautifulSoup(html, "lxml")
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    # 1. Parse top channel cards (<ytd-channel-renderer>)
+    # 1. Parse embedded ytInitialData JSON if present (always present in raw HTTP and full page loads)
+    pos = html.find("var ytInitialData = ")
+    if pos == -1:
+        pos = html.find('window["ytInitialData"] = ')
+        if pos != -1:
+            pos += len('window["ytInitialData"] = ')
+    else:
+        pos += len("var ytInitialData = ")
+
+    if pos != -1:
+        end_pos = html.find(";</script>", pos)
+        if end_pos != -1:
+            try:
+                data = json.loads(html[pos:end_pos])
+            except Exception:
+                data = None
+            if data:
+                def walk(obj: Any) -> None:
+                    if isinstance(obj, dict):
+                        if "videoRenderer" in obj:
+                            vr = obj["videoRenderer"]
+                            vid = vr.get("videoId")
+                            title = ""
+                            if "title" in vr and "runs" in vr["title"]:
+                                title = "".join(x.get("text", "") for x in vr["title"]["runs"])
+                            ch_name = ""
+                            ch_url = ""
+                            if "ownerText" in vr and "runs" in vr["ownerText"]:
+                                ch_name = vr["ownerText"]["runs"][0].get("text", "")
+                                nav = vr["ownerText"]["runs"][0].get("navigationEndpoint", {})
+                                base_url = nav.get("browseEndpoint", {}).get("canonicalBaseUrl", "")
+                                if base_url:
+                                    ch_url = f"https://www.youtube.com{base_url}"
+                            desc = ""
+                            if "detailedMetadataSnippets" in vr:
+                                for snip in vr["detailedMetadataSnippets"]:
+                                    desc += "".join(x.get("text", "") for x in snip.get("snippetText", {}).get("runs", []))
+                            v_url = canonicalize_url(f"https://www.youtube.com/watch?v={vid}") if vid else None
+                            if v_url and v_url not in seen:
+                                seen.add(v_url)
+                                results.append({
+                                    "title": title,
+                                    "video_url": v_url,
+                                    "channel_name": ch_name or title,
+                                    "channel_url": canonicalize_url(ch_url) if ch_url else v_url,
+                                    "description": desc,
+                                    "is_channel": False,
+                                })
+                        elif "channelRenderer" in obj:
+                            cr = obj["channelRenderer"]
+                            title = cr.get("title", {}).get("simpleText", "")
+                            nav = cr.get("navigationEndpoint", {})
+                            base_url = nav.get("browseEndpoint", {}).get("canonicalBaseUrl", "")
+                            ch_url = canonicalize_url(f"https://www.youtube.com{base_url}") if base_url else ""
+                            if ch_url and ch_url not in seen:
+                                seen.add(ch_url)
+                                results.append({
+                                    "title": f"{title} Podcast Channel",
+                                    "video_url": ch_url,
+                                    "channel_name": title,
+                                    "channel_url": ch_url,
+                                    "description": cr.get("descriptionSnippet", {}).get("runs", [{}])[0].get("text", ""),
+                                    "is_channel": True,
+                                })
+                        else:
+                            for v in obj.values():
+                                walk(v)
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            walk(item)
+                walk(data)
+
+    if results:
+        return results[:15]
+
+    soup = BeautifulSoup(html, "lxml")
+
+    # 2. Parse top channel cards (<ytd-channel-renderer>) from browser DOM
     channel_cards = soup.select("ytd-channel-renderer")
     for card in channel_cards:
         ch_link = card.select_one("a#main-link, a[href*='/@'], a[href*='/channel/'], a[href*='/c/']")
@@ -274,15 +355,15 @@ def parse_youtube_search_results_from_html(html: str) -> list[dict[str, Any]]:
         seen.add(ch_url)
         results.append(
             {
-                "title": f"{ch_name or 'Real Estate'} Podcast Channel",
+                "title": f"{ch_name or 'Podcast'} Channel",
                 "video_url": ch_url,
-                "channel_name": ch_name or "Real Estate Podcast",
+                "channel_name": ch_name or "Podcast Channel",
                 "channel_url": ch_url,
                 "is_channel": True,
             }
         )
 
-    # 2. Prefer real YouTube video cards (<ytd-video-renderer>) so channel links & titles match accurately
+    # 3. Prefer real YouTube video cards (<ytd-video-renderer>)
     video_cards = soup.select("ytd-video-renderer")
     if video_cards:
         for card in video_cards:
@@ -293,7 +374,6 @@ def parse_youtube_search_results_from_html(html: str) -> list[dict[str, Any]]:
             if "/watch?v=" not in href:
                 continue
             full_url = canonicalize_url(href if href.startswith("http") else f"https://www.youtube.com{href}")
-            # Strip timestamp parameter &t=... when canonicalizing watch URLs
             if full_url and "&t=" in full_url:
                 full_url = full_url.split("&t=")[0]
             if not full_url or full_url in seen:
@@ -319,7 +399,7 @@ def parse_youtube_search_results_from_html(html: str) -> list[dict[str, Any]]:
                     "channel_url": channel_url,
                 }
             )
-            if len(results) >= 10:
+            if len(results) >= 12:
                 break
         if results:
             return results
@@ -352,9 +432,31 @@ def parse_youtube_search_results_from_html(html: str) -> list[dict[str, Any]]:
                 "channel_url": channel_url,
             }
         )
-        if len(results) >= 10:
+        if len(results) >= 12:
             break
     return results
+
+
+async def search_youtube_http(query: str, max_results: int = 12) -> list[dict[str, Any]]:
+    """Fast, low-memory direct YouTube search via HTTP without headless Chromium.
+
+    Extracts genuine YouTube video and channel cards directly from YouTube initial data.
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    encoded = "+".join(query.strip().split())
+    url = f"https://www.youtube.com/results?search_query={encoded}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=headers) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                parsed = parse_youtube_search_results_from_html(resp.text)
+                return parsed[:max_results]
+    except Exception as exc:
+        logger.debug("search_youtube_http notice for '%s': %s", query, exc)
+    return []
 
 
 def parse_youtube_about_from_html(html: str, channel_url: str) -> dict[str, Any]:
@@ -421,6 +523,10 @@ def parse_youtube_about_from_html(html: str, channel_url: str) -> dict[str, Any]
 
     title_tag = soup.find("title")
     channel_name = title_tag.get_text(strip=True).replace(" - YouTube", "") if title_tag else ""
+    if not channel_name or channel_name.lower() in ("youtube", "about"):
+        m = re.search(r'"channelMetadataRenderer":\s*\{"title":\s*"([^"]+)"', combined_text)
+        if m:
+            channel_name = m.group(1)
     return {
         "channel_name": channel_name,
         "channel_url": canonicalize_url(channel_url) or channel_url,

@@ -91,6 +91,19 @@ _cached_leads: dict[str, tuple[float, list[Any]]] = {}
 _cached_status_responses: dict[str, tuple[float, AgentStatusResponse]] = {}
 
 
+def invalidate_agent_cache(agency_id: str | None = None) -> None:
+    """Invalidate in-memory status & lead caches so freshly retrieved leads appear immediately in UI."""
+    global _cached_stats, _cached_leads, _cached_status_responses
+    if agency_id:
+        _cached_stats.pop(agency_id, None)
+        _cached_leads.pop(agency_id, None)
+        _cached_status_responses.pop(agency_id, None)
+    else:
+        _cached_stats.clear()
+        _cached_leads.clear()
+        _cached_status_responses.clear()
+
+
 @router.get("/status", response_model=AgentStatusResponse)
 async def get_agent_status(
     agency_id: str = Depends(get_agency_id),
@@ -185,9 +198,23 @@ async def get_agent_status(
         stats_val = cached_s[1]
 
     cached_l = _cached_leads.get(agency_id)
-    if not cached_l or (now - cached_l[0]) > 3.5:
+    if not cached_l or (now - cached_l[0]) > 2.5:
         try:
-            leads_val = query_research_leads(db=db, agency_id=agency_id, filter_incomplete=True)[:10]
+            task_id_for_leads = active_task.id if active_task else None
+            if task_id_for_leads is not None:
+                task_leads = query_research_leads(
+                    db=db, agency_id=agency_id, research_task_id=task_id_for_leads, filter_incomplete=True
+                )[:25]
+                if task_leads:
+                    leads_val = task_leads
+                elif running_now:
+                    # Task is currently in progress and discovering fresh leads for this topic.
+                    # Do not show old leads from unrelated past topics (e.g. Real Estate).
+                    leads_val = []
+                else:
+                    leads_val = query_research_leads(db=db, agency_id=agency_id, filter_incomplete=True)[:25]
+            else:
+                leads_val = query_research_leads(db=db, agency_id=agency_id, filter_incomplete=True)[:25]
             _cached_leads[agency_id] = (now, leads_val)
         except Exception:
             leads_val = cached_l[1] if cached_l else []

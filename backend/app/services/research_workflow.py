@@ -748,18 +748,19 @@ class ResearchWorkflowManager:
                     )
 
                 # Continuous Autonomous Research Loop
-                # Continues searching across user-specified podcast topic keywords across YouTube & LinkedIn until user stops
+                # Searches across user-specified podcast topic keywords across YouTube & LinkedIn
                 SEARCH_KEYWORDS = generate_search_keyword_variations(keyword)
                 seen_urls: set[str] = set()
                 total_processed = 0
                 cycle = 0
+                consecutive_empty_cycles = 0
 
                 while not is_stop():
                     current_kw = SEARCH_KEYWORDS[cycle % len(SEARCH_KEYWORDS)]
                     cycle += 1
                     batch_candidates: list[dict[str, Any]] = []
 
-                    # 1. YouTube Discovery (Dedicated YouTube Tab in existing Chrome window if active)
+                    # 1. YouTube Discovery (Dedicated YouTube Tab in Chrome if active, or high-speed Zero-RAM HTTP search)
                     yt_query = current_kw if "podcast" in current_kw.lower() else f"{current_kw} podcast"
                     yt_search_url = build_youtube_search_url(yt_query)
                     await self._log(
@@ -800,6 +801,33 @@ class ResearchWorkflowManager:
                                         })
                         except Exception as yt_err:
                             logger.warning("YouTube search step encountered error: %s", yt_err)
+                    else:
+                        # Zero-RAM Cloud Discovery Mode via direct YouTube HTTP search
+                        try:
+                            from app.services.page_extractor import search_youtube_http
+                            yt_results = await search_youtube_http(yt_query, max_results=8)
+                            for y in yt_results:
+                                candidate_url = y.get("video_url") or y.get("channel_url")
+                                if candidate_url and candidate_url not in seen_urls:
+                                    seen_urls.add(candidate_url)
+                                    ch_name = y.get("channel_name") or y.get("title") or current_kw
+                                    batch_candidates.append({
+                                        "post_url": candidate_url,
+                                        "post_caption": f"{y.get('title', '')} - {current_kw} by {ch_name}. {y.get('description', '')}",
+                                        "posting_account": ch_name,
+                                        "posting_account_url": y.get("channel_url"),
+                                        "video_url": y.get("video_url") if (y.get("video_url") and "/watch?v=" in str(y.get("video_url"))) else None,
+                                        "has_video_element": True,
+                                        "published_label": "YouTube",
+                                        "keywords_matched": [current_kw, "podcast"],
+                                        "external_urls": [u for u in [candidate_url, y.get("channel_url")] if u],
+                                        "comments": [],
+                                        "youtube_channel_url": y.get("channel_url"),
+                                        "podcast_name": ch_name,
+                                        "episode_title": y.get("title"),
+                                    })
+                        except Exception as yt_err:
+                            logger.warning("Cloud YouTube HTTP search step error: %s", yt_err)
 
                     # 2. LinkedIn Discovery (Dedicated LinkedIn Tab in existing Chrome window if active)
                     if browser_started and getattr(active_browser, "is_active", False):
@@ -823,7 +851,7 @@ class ResearchWorkflowManager:
                                     url=li_nav.url,
                                     level="WARNING",
                                     screenshot_path=li_nav.screenshot_path,
-                                )
+                                    )
                             elif li_nav.success:
                                 for scroll_idx in range(2):
                                     if is_stop() or not await self._wait_if_paused(task_id, ctx):
@@ -867,6 +895,7 @@ class ResearchWorkflowManager:
                             logger.debug("Tavily fallback: %s", exc)
 
                     if batch_candidates:
+                        consecutive_empty_cycles = 0
                         await self._log(
                             task_id,
                             "multi_channel_discovery",
@@ -874,9 +903,10 @@ class ResearchWorkflowManager:
                             f"Discovered {len(batch_candidates)} candidate podcast channels & episodes for '{current_kw}'. Processing research on each channel...",
                             progress=min(95, 25 + (total_processed % 35) * 2),
                         )
+                    else:
+                        consecutive_empty_cycles += 1
 
                     # 4. Process each discovered podcast/channel with resilient skip-on-error logic
-                    # Never gets stuck on one channel; if fetching fails, logs and proceeds to next channel!
                     for candidate in batch_candidates:
                         if is_stop() or not await self._wait_if_paused(task_id, ctx):
                             break
@@ -927,6 +957,9 @@ class ResearchWorkflowManager:
                                     url=target_url,
                                     progress=min(95, 28 + (total_processed % 35) * 2),
                                 )
+                                # Invalidate cache immediately so new lead appears in dashboard table in real time
+                                from app.api.v1.agent import invalidate_agent_cache
+                                invalidate_agent_cache(agency_id)
                         except Exception as exc:
                             logger.warning("Error processing channel '%s': %s", channel_name, exc)
                             await self._log(
@@ -939,6 +972,31 @@ class ResearchWorkflowManager:
                             )
                         finally:
                             db_item.close()
+
+                        # Exit early if target limit of posts has been reached
+                        if max_posts and total_processed >= max_posts:
+                            await self._log(
+                                task_id,
+                                "target_reached",
+                                "done",
+                                f"Reached research target limit ({max_posts} lead(s)) for '{keyword}'.",
+                                progress=95,
+                            )
+                            break
+
+                    # Check completion conditions
+                    if max_posts and total_processed >= max_posts:
+                        break
+
+                    if consecutive_empty_cycles >= 2 and cycle >= len(SEARCH_KEYWORDS):
+                        await self._log(
+                            task_id,
+                            "search_complete",
+                            "done",
+                            f"Exhaustive search finished across all topic keyword variations for '{keyword}'. Processed {total_processed} channels.",
+                            progress=95,
+                        )
+                        break
 
                     # Clean up any extra background tabs opened during research to free RAM and CPU
                     if browser_started and getattr(active_browser, "is_active", False):
@@ -1025,6 +1083,11 @@ class ResearchWorkflowManager:
             self._active_tasks.pop(task_id, None)
             if not any(t.status == "running" for t in self._active_tasks.values()):
                 self._agent_state = "idle"
+            try:
+                from app.api.v1.agent import invalidate_agent_cache
+                invalidate_agent_cache(agency_id)
+            except Exception:
+                pass
 
 
 workflow_manager = ResearchWorkflowManager()

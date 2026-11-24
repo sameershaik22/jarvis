@@ -63,36 +63,35 @@ async def research_host_company(
     if resolved_host_linkedin:
         evidence_urls.append(resolved_host_linkedin)
 
-    if allow_live_browser and browser is not None and host_name:
-        # Step 1: If no host LinkedIn URL, search Tavily or LinkedIn
-        if not resolved_host_linkedin:
-            # Query Tavily first for exact host LinkedIn
-            t_res = await search_tavily(f"{host_name} {company_name or 'real estate'} LinkedIn", max_results=3)
-            for r in t_res:
-                u = r.get("url", "")
-                if "linkedin.com/in/" in u:
-                    resolved_host_linkedin = canonicalize_url(u)
-                    if resolved_host_linkedin:
-                        evidence_urls.append(resolved_host_linkedin)
-                        notes_parts.append(f"Located host LinkedIn via Tavily search: {resolved_host_linkedin}")
-                        break
+    # Step 1: If no host LinkedIn URL, query Tavily for exact host LinkedIn
+    if host_name and not resolved_host_linkedin:
+        t_res = await search_tavily(f"{host_name} {company_name or 'podcast'} LinkedIn", max_results=3)
+        for r in t_res:
+            u = r.get("url", "")
+            if "linkedin.com/in/" in u:
+                resolved_host_linkedin = canonicalize_url(u)
+                if resolved_host_linkedin:
+                    evidence_urls.append(resolved_host_linkedin)
+                    notes_parts.append(f"Located host LinkedIn via Tavily search: {resolved_host_linkedin}")
+                    break
 
-            if not resolved_host_linkedin:
-                search_url = f"https://www.linkedin.com/search/results/people/?keywords={quote_plus(host_name)}"
-                res = await browser.open_url(search_url, screenshot_label="host_li_search")
-                if res.success and (not res.gate or not res.gate.restricted):
-                    html = await browser.get_html()
-                    soup = BeautifulSoup(html, "lxml")
-                    for a in soup.find_all("a", href=True):
-                        href = a["href"]
-                        if "/in/" in href:
-                            resolved_host_linkedin = canonicalize_url(
-                                href if href.startswith("http") else f"https://www.linkedin.com{href}"
-                            )
-                            if resolved_host_linkedin:
-                                evidence_urls.append(resolved_host_linkedin)
-                                notes_parts.append(f"Located host LinkedIn via search: {resolved_host_linkedin}")
-                                break
+    if allow_live_browser and browser is not None and getattr(browser, "is_active", False) and host_name:
+        if not resolved_host_linkedin:
+            search_url = f"https://www.linkedin.com/search/results/people/?keywords={quote_plus(host_name)}"
+            res = await browser.open_url(search_url, screenshot_label="host_li_search")
+            if res.success and (not res.gate or not res.gate.restricted):
+                html = await browser.get_html()
+                soup = BeautifulSoup(html, "lxml")
+                for a in soup.find_all("a", href=True):
+                    href = a["href"]
+                    if "/in/" in href:
+                        resolved_host_linkedin = canonicalize_url(
+                            href if href.startswith("http") else f"https://www.linkedin.com{href}"
+                        )
+                        if resolved_host_linkedin:
+                            evidence_urls.append(resolved_host_linkedin)
+                            notes_parts.append(f"Located host LinkedIn via search: {resolved_host_linkedin}")
+                            break
 
         # Step 2: Open host LinkedIn profile if accessible
         if resolved_host_linkedin:

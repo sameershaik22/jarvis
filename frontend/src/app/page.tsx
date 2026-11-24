@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   Bot,
+  Clock,
   Database,
   ExternalLink,
   FileSpreadsheet,
@@ -38,6 +39,28 @@ interface LeadItem {
   youtube_channel_url?: string | null;
   original_podcast_url?: string | null;
   research_date?: string | null;
+  discovered_at?: string | null;
+  discovered_time?: string | null;
+  search_keyword?: string | null;
+}
+
+function formatLeadTime(item: LeadItem): string {
+  if (item.discovered_time && item.discovered_time !== "Recent") {
+    return item.discovered_time;
+  }
+  const dateStr = item.discovered_at || item.research_date;
+  if (!dateStr) return "Just now";
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diffSec = Math.floor((now.getTime() - d.getTime()) / 1000);
+    if (diffSec < 60) return "Just now";
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  } catch {
+    return "Recent";
+  }
 }
 
 interface AgentStatus {
@@ -261,7 +284,7 @@ export default function AgentWorkspacePage() {
   const stats = status?.stats;
   const rawLeads = status?.recent_leads || [];
   const recentLeads = rawLeads.filter(
-    (r) => r.host_full_name || (r.business_email && r.business_email !== "Searching...")
+    (r) => r.podcast_name || r.host_full_name || r.business_email
   );
 
   return (
@@ -684,7 +707,10 @@ export default function AgentWorkspacePage() {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <ExportControls label="Export Leads" />
+            <ExportControls
+              label="Export Leads"
+              filters={task?.id ? { research_task_id: task.id } : {}}
+            />
           </div>
         </div>
 
@@ -698,17 +724,32 @@ export default function AgentWorkspacePage() {
                 <th className="px-4 py-3">Business Email</th>
                 <th className="px-4 py-3">Video Quality</th>
                 <th className="px-4 py-3">Verification</th>
+                <th className="px-4 py-3">Discovered</th>
                 <th className="px-4 py-3 text-right">Links</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {recentLeads.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                    <p className="text-sm">No podcast leads discovered yet in this session.</p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Click <strong className="text-cyan-400">Start Research</strong> above &mdash; YoursBuddy will continuously search LinkedIn & YouTube, extract host emails, and populate this table in real time.
-                    </p>
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                    {status?.agent_state === "running" ? (
+                      <div className="flex flex-col items-center justify-center gap-2 py-4">
+                        <div className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                        <p className="text-sm font-medium text-cyan-300">
+                          Researching YouTube &amp; LinkedIn for &apos;{task?.search_keyword || "podcasts"}&apos;...
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Discovered leads will appear here one-by-one with discovery timestamps as retrieved.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-sm">No podcast leads discovered yet in this session.</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Click <strong className="text-cyan-400">Start Research</strong> or ask Jarvis above &mdash; YoursBuddy will continuously search LinkedIn &amp; YouTube, extract host emails, and populate this table in real time.
+                        </p>
+                      </>
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -749,6 +790,12 @@ export default function AgentWorkspacePage() {
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={r.identity_verification_status} />
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                        <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
+                        {formatLeadTime(r)}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-1.5 justify-end">

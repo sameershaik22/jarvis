@@ -190,46 +190,75 @@ async def discover_host_contacts(
                     )
 
     # Priority 2: Original YouTube channel About section (MANDATORY when no suitable email found yet!)
-    if not discovered and youtube_channel_url and allow_live_browser and browser is not None:
-        for yt_target in (youtube_channel_url.rstrip("/") + "/about", youtube_channel_url.rstrip("/")):
-            yt_res = await browser.open_url(yt_target, screenshot_label="youtube_about")
-            if yt_res.success and (not yt_res.gate or not yt_res.gate.restricted):
-                # Click '...more' channel description button if visible (never touches CAPTCHA)
-                await browser.click("button:has-text('more'), yt-attributed-string button", timeout_ms=2000)
-                yt_html = await browser.get_html()
-                yt_about = parse_youtube_about_from_html(yt_html, youtube_channel_url)
-                if yt_about["websites"] and not official_website:
-                    official_website = yt_about["websites"][0]
-                for email in yt_about["emails"]:
-                    if email not in seen_emails:
-                        seen_emails.add(email)
-                        cat = categorize_email(email, host_name, "YouTube About")
-                        discovered.append(
-                            DiscoveredContact(
-                                email=email,
-                                email_category=cat,
-                                phone=None,
-                                official_website=official_website,
-                                contact_page=None,
-                                source_type="YouTube About",
-                                source_url=yt_about["channel_url"],
-                                discovery_method="youtube_channel_about_section",
-                                verification_status="Partially Verified",
-                                confidence_score=78,
-                                notes="Discovered in original podcast YouTube channel About section.",
-                            )
-                        )
-                if discovered:
+    if not discovered and youtube_channel_url:
+        yt_html = None
+        if allow_live_browser and browser is not None and getattr(browser, "is_active", False):
+            for yt_target in (youtube_channel_url.rstrip("/") + "/about", youtube_channel_url.rstrip("/")):
+                yt_res = await browser.open_url(yt_target, screenshot_label="youtube_about")
+                if yt_res.success and (not yt_res.gate or not yt_res.gate.restricted):
+                    await browser.click("button:has-text('more'), yt-attributed-string button", timeout_ms=2000)
+                    yt_html = await browser.get_html()
                     break
+        else:
+            # Low-memory direct HTTP fetch (Zero-RAM Cloud Mode)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+            try:
+                async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, headers=headers) as client:
+                    resp = await client.get(youtube_channel_url.rstrip("/"))
+                    if resp.status_code == 200:
+                        yt_html = resp.text
+            except Exception as exc:
+                logger.debug("YouTube channel HTTP about fetch notice: %s", exc)
+
+        if yt_html:
+            yt_about = parse_youtube_about_from_html(yt_html, youtube_channel_url)
+            if yt_about["websites"] and not official_website:
+                official_website = yt_about["websites"][0]
+            for email in yt_about["emails"]:
+                if email not in seen_emails:
+                    seen_emails.add(email)
+                    cat = categorize_email(email, host_name, "YouTube About")
+                    discovered.append(
+                        DiscoveredContact(
+                            email=email,
+                            email_category=cat,
+                            phone=None,
+                            official_website=official_website,
+                            contact_page=None,
+                            source_type="YouTube About",
+                            source_url=yt_about["channel_url"],
+                            discovery_method="youtube_channel_about_section",
+                            verification_status="Partially Verified",
+                            confidence_score=78,
+                            notes="Discovered in original podcast YouTube channel About section.",
+                        )
+                    )
 
     # Check official company website /contact page if still no email
-    if not discovered and official_website and is_safe_company_website(official_website) and allow_live_browser and browser is not None:
+    if not discovered and official_website and is_safe_company_website(official_website):
         for candidate_url in [official_website, urljoin(official_website.rstrip("/") + "/", "contact")]:
             if not is_safe_company_website(candidate_url):
                 continue
-            web_res = await browser.open_url(candidate_url, screenshot_label="official_site_contact")
-            if web_res.success and (not web_res.gate or not web_res.gate.restricted):
-                txt = await browser.read_visible_text(10000)
+            txt = None
+            if allow_live_browser and browser is not None and getattr(browser, "is_active", False):
+                web_res = await browser.open_url(candidate_url, screenshot_label="official_site_contact")
+                if web_res.success and (not web_res.gate or not web_res.gate.restricted):
+                    txt = await browser.read_visible_text(10000)
+            else:
+                try:
+                    async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+                        resp = await client.get(candidate_url)
+                        if resp.status_code == 200:
+                            from bs4 import BeautifulSoup
+                            s = BeautifulSoup(resp.text, "lxml")
+                            txt = s.get_text(" ", strip=True)
+                except Exception:
+                    txt = None
+
+            if txt:
                 emails = extract_emails_from_text(txt)
                 phones = extract_phones_from_text(txt)
                 if emails:
