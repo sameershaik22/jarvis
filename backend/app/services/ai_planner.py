@@ -20,7 +20,7 @@ def _call_gemini_sync(
     prompt: str, inline_parts: list[dict[str, Any]] | None = None, json_mode: bool = True
 ) -> dict[str, Any] | None:
     settings = get_settings()
-    if not settings.gemini_api_key or not settings.gemini_api_key.strip():
+    if settings.environment == "test" or not settings.gemini_api_key or not settings.gemini_api_key.strip():
         return None
     model = settings.gemini_model or "gemini-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -121,7 +121,7 @@ class AIPlanner:
 
     def _get_client(self) -> AsyncOpenAI | None:
         settings = get_settings()
-        if not settings.openai_api_key or not settings.openai_api_key.strip():
+        if settings.environment == "test" or not settings.openai_api_key or not settings.openai_api_key.strip():
             return None
         if self._client is None:
             self._client = AsyncOpenAI(api_key=settings.openai_api_key.strip())

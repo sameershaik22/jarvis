@@ -199,7 +199,7 @@ async def discover_host_contacts(
                     await browser.click("button:has-text('more'), yt-attributed-string button", timeout_ms=2000)
                     yt_html = await browser.get_html()
                     break
-        else:
+        elif get_settings().environment != "test":
             # Low-memory direct HTTP fetch (Zero-RAM Cloud Mode)
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -238,7 +238,7 @@ async def discover_host_contacts(
                     )
 
     # Check official company website /contact page if still no email
-    if not discovered and official_website and is_safe_company_website(official_website):
+    if not discovered and official_website and is_safe_company_website(official_website) and get_settings().environment != "test":
         for candidate_url in [official_website, urljoin(official_website.rstrip("/") + "/", "contact")]:
             if not is_safe_company_website(candidate_url):
                 continue
@@ -310,6 +310,38 @@ async def discover_host_contacts(
                     )
             if discovered:
                 break
+
+    # Also check Tavily for podcast channel contact / booking email
+    pod_name = post_data.get("podcast_name") or post_data.get("posting_account")
+    if not discovered and pod_name:
+        try:
+            t_res_pod = await search_tavily(f'"{pod_name}" podcast contact email inquiries', max_results=3)
+            for r in t_res_pod:
+                content = (r.get("content") or "") + " " + (r.get("title") or "")
+                emails = extract_emails_from_text(content)
+                for email in emails:
+                    if email not in seen_emails:
+                        seen_emails.add(email)
+                        cat = categorize_email(email, host_name or pod_name, "YouTube About")
+                        discovered.append(
+                            DiscoveredContact(
+                                email=email,
+                                email_category=cat,
+                                phone=None,
+                                official_website=official_website or r.get("url"),
+                                contact_page=r.get("url"),
+                                source_type="YouTube About",
+                                source_url=r.get("url"),
+                                discovery_method="public_podcast_inquiry_search",
+                                verification_status="Partially Verified",
+                                confidence_score=72,
+                                notes=f"Discovered via podcast inquiry search for '{pod_name}'",
+                            )
+                        )
+                if discovered:
+                    break
+        except Exception:
+            pass
 
     # Priority 3: Apollo fallback ONLY if no email found above
     if not discovered and host_name:

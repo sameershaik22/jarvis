@@ -475,6 +475,7 @@ class ResearchWorkflowManager:
         agency_id: str = "default",
         browser: Any = None,
         stop_requested: bool = False,
+        keyword: str | None = None,
     ) -> dict[str, Any]:
         """Execute Modules 3 -> 8 for a single discovered podcast post."""
         if self._stop_requested or stop_requested:
@@ -512,6 +513,7 @@ class ResearchWorkflowManager:
             video_meta=v_meta,
             audio_accessible=audio_accessible,
             quality_threshold=quality_threshold,
+            keyword=keyword,
         )
         qa = upsert_quality_assessment(
             db=db,
@@ -614,10 +616,16 @@ class ResearchWorkflowManager:
                 )
 
         company_obj = None
-        if comp_res.company_name:
+        effective_company_name = comp_res.company_name
+        if not effective_company_name:
+            if host_person and host_person.full_name:
+                effective_company_name = f"{host_person.full_name} Media"
+            elif orig_res.podcast_name:
+                effective_company_name = orig_res.podcast_name
+        if effective_company_name:
             company_obj = upsert_company(
                 db=db,
-                company_name=comp_res.company_name,
+                company_name=effective_company_name,
                 linkedin_url=comp_res.company_linkedin_url,
                 website=comp_res.official_website,
                 location=comp_res.company_location,
@@ -761,7 +769,18 @@ class ResearchWorkflowManager:
                     batch_candidates: list[dict[str, Any]] = []
 
                     # 1. YouTube Discovery (Dedicated YouTube Tab in Chrome if active, or high-speed Zero-RAM HTTP search)
-                    yt_query = current_kw if "podcast" in current_kw.lower() else f"{current_kw} podcast"
+                    cycle_mod = (cycle - 1) % 5
+                    if cycle_mod == 0:
+                        yt_query = f"{current_kw} podcast" if "podcast" not in current_kw.lower() else current_kw
+                    elif cycle_mod == 1:
+                        yt_query = f"Top {current_kw} podcast"
+                    elif cycle_mod == 2:
+                        yt_query = f"Best {current_kw} podcast host interview"
+                    elif cycle_mod == 3:
+                        yt_query = f"{current_kw} founder podcast show"
+                    else:
+                        yt_query = f"{current_kw} podcast episode"
+
                     yt_search_url = build_youtube_search_url(yt_query)
                     await self._log(
                         task_id,
@@ -870,7 +889,8 @@ class ResearchWorkflowManager:
                     if len(batch_candidates) < 3 and not is_stop():
                         try:
                             from app.services.tavily_search import search_tavily
-                            t_res = await search_tavily(f'"{current_kw}" podcast youtube channel host', max_results=6)
+                            cycle_term = ["channel", "host", "founder", "interviews", "episodes"][cycle % 5]
+                            t_res = await search_tavily(f'"{current_kw}" podcast {cycle_term}', max_results=6)
                             for r in t_res:
                                 u = r.get("url", "")
                                 if u and u not in seen_urls and not any(d in u.lower() for d in ("instagram.com", "facebook.com", "tiktok.com")):
@@ -935,6 +955,7 @@ class ResearchWorkflowManager:
                                 agency_id=agency_id,
                                 browser=active_browser,
                                 stop_requested=is_stop(),
+                                keyword=keyword,
                             )
                             lead_name = res.get("host_name")
                             lead_email = res.get("email")
@@ -973,31 +994,6 @@ class ResearchWorkflowManager:
                         finally:
                             db_item.close()
 
-                        # Exit early if target limit of posts has been reached
-                        if max_posts and total_processed >= max_posts:
-                            await self._log(
-                                task_id,
-                                "target_reached",
-                                "done",
-                                f"Reached research target limit ({max_posts} lead(s)) for '{keyword}'.",
-                                progress=95,
-                            )
-                            break
-
-                    # Check completion conditions
-                    if max_posts and total_processed >= max_posts:
-                        break
-
-                    if consecutive_empty_cycles >= 2 and cycle >= len(SEARCH_KEYWORDS):
-                        await self._log(
-                            task_id,
-                            "search_complete",
-                            "done",
-                            f"Exhaustive search finished across all topic keyword variations for '{keyword}'. Processed {total_processed} channels.",
-                            progress=95,
-                        )
-                        break
-
                     # Clean up any extra background tabs opened during research to free RAM and CPU
                     if browser_started and getattr(active_browser, "is_active", False):
                         try:
@@ -1005,7 +1001,7 @@ class ResearchWorkflowManager:
                         except Exception:
                             pass
 
-                    # Pause briefly before next cycle
+                    # Pause briefly before next cycle; continuous autonomous research continues until user stops
                     if is_stop():
                         break
                     await asyncio.sleep(2)

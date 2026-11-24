@@ -18,7 +18,7 @@ async def search_tavily(
 ) -> list[dict[str, Any]]:
     """Search Google / Web via Tavily Search API for reliable, anti-bot-safe agent discovery."""
     settings = get_settings()
-    if not settings.tavily_api_key or not settings.tavily_api_key.strip():
+    if settings.environment == "test" or not settings.tavily_api_key or not settings.tavily_api_key.strip():
         return []
 
     payload: dict[str, Any] = {

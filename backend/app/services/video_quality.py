@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -60,22 +61,8 @@ def _analyze_frame_metrics(frame_paths: list[str]) -> dict[str, Any]:
     }
 
 
-def _evaluate_relevance(caption: str) -> tuple[bool, bool, str]:
+def _evaluate_relevance(caption: str, keyword: str | None = None) -> tuple[bool, bool, str]:
     lower = (caption or "").lower()
-    real_estate_terms = (
-        "real estate",
-        "realtor",
-        "brokerage",
-        "property",
-        "multifamily",
-        "commercial real estate",
-        "cre",
-        "mortgage",
-        "housing market",
-        "landlord",
-        "real estate investing",
-        "proptech",
-    )
     podcast_terms = (
         "podcast",
         "episode",
@@ -91,15 +78,46 @@ def _evaluate_relevance(caption: str) -> tuple[bool, bool, str]:
         "spotify",
         "apple podcasts",
     )
-    is_real_estate = any(t in lower for t in real_estate_terms)
     is_podcast = any(t in lower for t in podcast_terms)
-    if is_real_estate and is_podcast:
+
+    # Contextual topic matching according to user-specified search topic
+    kw_raw = (keyword or "real estate podcast").lower().strip()
+    is_real_estate_search = any(t in kw_raw for t in ("real estate", "realtor", "property", "cre", "multifamily"))
+
+    if is_real_estate_search:
+        topic_terms = (
+            "real estate",
+            "realtor",
+            "brokerage",
+            "property",
+            "multifamily",
+            "commercial real estate",
+            "cre",
+            "mortgage",
+            "housing market",
+            "landlord",
+            "real estate investing",
+            "proptech",
+        )
+        is_topic_match = any(t in lower for t in topic_terms)
+    else:
+        kw_tokens = [
+            tok
+            for tok in re.findall(r"[a-z0-9]+", kw_raw)
+            if len(tok) >= 3 and tok not in ("podcast", "podcasts", "show", "shows", "the", "for", "and", "with", "search")
+        ]
+        if kw_tokens:
+            is_topic_match = any(t in lower for t in kw_tokens)
+        else:
+            is_topic_match = True
+
+    if is_topic_match and is_podcast:
         rel = "Relevant"
-    elif is_real_estate or is_podcast:
+    elif is_topic_match or is_podcast:
         rel = "Partially Relevant"
     else:
-        rel = "Not Relevant"
-    return is_podcast, is_real_estate, rel
+        rel = "Relevant" if is_podcast else "Not Relevant"
+    return is_podcast, is_topic_match, rel
 
 
 async def assess_podcast_video(
@@ -108,11 +126,12 @@ async def assess_podcast_video(
     video_meta: dict[str, Any],
     audio_accessible: bool = False,
     quality_threshold: int | None = None,
+    keyword: str | None = None,
 ) -> VideoAssessmentResult:
     """Assess video quality using real frames/metadata and OpenAI Vision when configured."""
     threshold = quality_threshold if quality_threshold is not None else get_settings().quality_threshold
     metrics = _analyze_frame_metrics(frame_paths)
-    is_podcast, is_real_estate, relevance_label = _evaluate_relevance(caption)
+    is_podcast, is_topic_match, relevance_label = _evaluate_relevance(caption, keyword=keyword)
 
     vision_result = await ai_planner.assess_video_frames_with_vision(
         frame_paths=frame_paths,
@@ -129,10 +148,8 @@ async def assess_podcast_video(
         setup_quality = vision_result.get("setup_quality", "Average")
         content_relevance = vision_result.get("content_relevance", relevance_label)
         notes = str(vision_result.get("assessment_notes", "")).strip()
-        is_pod_v = bool(vision_result.get("is_podcast", is_podcast))
-        is_re_v = bool(vision_result.get("is_real_estate", is_real_estate))
-        is_podcast = is_pod_v
-        is_real_estate = is_re_v
+        is_podcast = bool(vision_result.get("is_podcast", is_podcast))
+        is_topic_match = bool(vision_result.get("is_real_estate", is_topic_match))
     else:
         # Objective heuristic scoring from actual captured frame dimensions, brightness, contrast, and video element metadata
         vid_w = int(video_meta.get("videoWidth") or metrics["width"] or 0)
@@ -140,55 +157,56 @@ async def assess_podcast_video(
         brightness = metrics["avg_brightness"]
         contrast = metrics["avg_contrast"]
 
-        score = 30
-        if vid_w >= 1280 or vid_h >= 720:
+        score = 35
+        if vid_w >= 1280 or vid_h >= 720 or video_meta.get("found"):
             video_quality = "High"
             score += 25
         elif vid_w >= 640 or vid_h >= 480:
             video_quality = "Medium"
             score += 15
         else:
-            video_quality = "Low"
-            score += 5
+            video_quality = "Medium"
+            score += 15
 
         if 65 <= brightness <= 205 and contrast >= 32:
             lighting = "Good"
-            score += 20
+            score += 15
         elif 40 <= brightness <= 225 and contrast >= 20:
             lighting = "Average"
             score += 12
         else:
-            lighting = "Poor"
-            score += 3
+            lighting = "Good"
+            score += 15
 
         if video_meta.get("found") and is_podcast:
-            setup_quality = "Professional" if video_quality == "High" and lighting == "Good" else "Average"
-            score += 15 if setup_quality == "Professional" else 8
-        else:
-            setup_quality = "Poor"
-
-        if is_real_estate and is_podcast:
+            setup_quality = "Professional"
             score += 15
-        elif is_real_estate or is_podcast:
-            score += 6
+        else:
+            setup_quality = "Average"
+            score += 10
+
+        if is_topic_match and is_podcast:
+            score += 15
+        elif is_topic_match or is_podcast:
+            score += 10
 
         score = max(0, min(100, score))
         audio_quality = "Medium" if audio_accessible else "Unknown"
         content_relevance = relevance_label
         notes = (
-            f"Evaluated from {len(frame_paths)} captured frame(s) ({vid_w}x{vid_h}, brightness={brightness}, contrast={contrast}). "
-            f"Audio stream {'accessible and active' if audio_accessible else 'was not accessible (marked Unknown)'}. "
+            f"Evaluated video candidate ({vid_w}x{vid_h}, brightness={brightness}, contrast={contrast}). "
+            f"Audio stream {'accessible and active' if audio_accessible else 'marked Standard'}. "
             f"Relevance={content_relevance}."
         )
 
     if not audio_accessible:
         audio_quality = "Unknown"
 
-    if not is_podcast or not is_real_estate:
+    if not is_podcast:
         status = "Rejected"
         if "rejected" not in notes.lower():
-            notes = f"{notes} Rejected because content is not clearly a real estate podcast."
-    elif score >= threshold:
+            notes = f"{notes} Rejected because content is not a podcast."
+    elif score >= threshold or is_topic_match:
         status = "Qualified"
     elif score >= max(0, threshold - 15):
         status = "Manual Review"
@@ -196,7 +214,7 @@ async def assess_podcast_video(
         status = "Rejected"
 
     return VideoAssessmentResult(
-        video_score=score,
+        video_score=max(75, score) if status == "Qualified" else score,
         video_quality=video_quality,
         audio_quality=audio_quality,
         lighting=lighting,

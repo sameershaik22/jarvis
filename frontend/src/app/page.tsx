@@ -45,21 +45,18 @@ interface LeadItem {
 }
 
 function formatLeadTime(item: LeadItem): string {
-  if (item.discovered_time && item.discovered_time !== "Recent") {
-    return item.discovered_time;
-  }
   const dateStr = item.discovered_at || item.research_date;
   if (!dateStr) return "Just now";
   try {
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return item.discovered_time || "Recent";
     const now = new Date();
     const diffSec = Math.floor((now.getTime() - d.getTime()) / 1000);
-    if (diffSec < 60) return "Just now";
+    if (diffSec < 45) return "Just now";
     if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
   } catch {
-    return "Recent";
+    return item.discovered_time || "Recent";
   }
 }
 

@@ -17,6 +17,25 @@ GUEST_EXCLUSION_PATTERNS = [
 ]
 
 
+STOP_WORDS = {
+    "into", "the", "a", "an", "for", "with", "and", "by", "from",
+    "on", "in", "to", "of", "about", "at", "as", "or", "is", "your",
+    "our", "my", "how", "what", "why", "where", "who", "when", "all"
+}
+
+BRAND_WORDS = {
+    "podcast", "show", "media", "tv", "productions", "production", "network",
+    "channel", "llc", "inc", "company", "group", "daily", "news",
+    "realty", "investing", "properties", "real", "estate", "cre", "break",
+    "blueprint", "talks", "digest", "capital", "partners", "ventures",
+    "studio", "studios", "radio", "hub", "insider", "live", "uncut",
+    "corp", "corporation", "ltd", "agency", "management", "financial",
+    "solutions", "holdings", "advisors", "equity", "bolt", "brick", "series",
+    "talk", "interviews", "unfiltered", "academy", "consulting", "enterprises",
+    "page", "listing", "tour", "tours", "service", "services", "official", "video", "videos"
+}
+
+
 def is_valid_person_name(name: str | None, podcast_name: str | None = None) -> bool:
     """Strictly validate that a name belongs to an actual individual human host, NOT a brand, channel, or phrase."""
     if not name or not isinstance(name, str):
@@ -26,34 +45,20 @@ def is_valid_person_name(name: str | None, podcast_name: str | None = None) -> b
     if len(tokens) < 2 or len(tokens) > 4:
         return False
 
-    # Disallow matching podcast or channel brand name
+    # Disallow matching podcast or channel brand name if it's a corporate/media brand
     if podcast_name:
         clean_pod = re.sub(r"[^\w\s]", "", podcast_name).lower().strip()
-        if clean.lower() == clean_pod or clean_pod in clean.lower():
+        pod_tokens = clean_pod.split()
+        has_pod_brand = any(t in BRAND_WORDS for t in pod_tokens)
+        if has_pod_brand and (clean.lower() == clean_pod or clean_pod in clean.lower()):
             return False
 
     # Stop words / prepositions indicating titles, slogans, or channel descriptions
-    stop_words = {
-        "into", "the", "a", "an", "for", "with", "and", "by", "from",
-        "on", "in", "to", "of", "about", "at", "as", "or", "is", "your",
-        "our", "my", "how", "what", "why", "where", "who", "when", "all"
-    }
-    if any(t.lower() in stop_words for t in tokens):
+    if any(t.lower() in STOP_WORDS for t in tokens):
         return False
 
     # Brand / media / corporate words that cannot be part of an individual's personal name
-    brand_words = {
-        "podcast", "show", "media", "tv", "productions", "production", "network",
-        "channel", "llc", "inc", "company", "group", "daily", "news",
-        "realty", "investing", "properties", "real", "estate", "cre", "break",
-        "blueprint", "talks", "digest", "capital", "partners", "ventures",
-        "studio", "studios", "radio", "hub", "insider", "live", "uncut",
-        "corp", "corporation", "ltd", "agency", "management", "financial",
-        "solutions", "holdings", "advisors", "equity", "bolt", "brick", "series",
-        "talk", "interviews", "unfiltered", "academy", "consulting", "enterprises",
-        "page", "listing", "tour", "tours", "service", "services", "official", "video", "videos"
-    }
-    if any(t.lower() in brand_words for t in tokens):
+    if any(t.lower() in BRAND_WORDS for t in tokens):
         return False
 
     # Each token in a person's name must start with an uppercase letter and consist of alphabetic characters
@@ -123,6 +128,34 @@ async def identify_podcast_host(
         if posting_account.lower() not in guest_names:
             host_name = posting_account
             confidence = 72
+
+    # If host still not identified, search Tavily for podcast host
+    if not host_name and podcast_name:
+        try:
+            from app.services.tavily_search import search_tavily
+            t_res = await search_tavily(f'"{podcast_name}" podcast host', max_results=3)
+            for r in t_res:
+                txt = r.get("title", "") + " " + r.get("content", "")
+                for pat in HOST_PATTERNS:
+                    for m in pat.finditer(txt):
+                        candidate = m.group(1).strip()
+                        tokens = candidate.split()
+                        for take_len in (2, min(len(tokens), 3)):
+                            sub_cand = " ".join(tokens[:take_len])
+                            if sub_cand.lower() not in guest_names and is_valid_person_name(sub_cand, podcast_name):
+                                host_name = sub_cand
+                                confidence = 75
+                                if r.get("url"):
+                                    evidence_urls.append(r["url"])
+                                break
+                        if host_name:
+                            break
+                    if host_name:
+                        break
+                if host_name:
+                    break
+        except Exception:
+            pass
 
     # If posting account is a personal LinkedIn profile (/in/) and not flagged as a guest, strong host signal
     host_linkedin_url: str | None = None
