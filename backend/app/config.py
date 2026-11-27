@@ -17,7 +17,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "YoursBuddy AI"
+    app_name: str = "Jarvis AI"
     api_v1_prefix: str = "/api/v1"
     environment: str = "development"
 

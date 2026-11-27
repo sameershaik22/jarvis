@@ -294,7 +294,7 @@ export default function AgentWorkspacePage() {
             Jarvis Agent Workspace
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Autonomous Podcast Research Agent &bull; Topic: <strong className="text-cyan-300">{task?.search_keyword || "Custom Niche & Topics"}</strong> &bull; Saves leads to Neon PostgreSQL
+            Autonomous Podcast Research Agent &bull; Topic: <strong className="text-cyan-300">{task?.search_keyword || "Custom Niche & Topics"}</strong>
           </p>
         </div>
 
@@ -505,7 +505,7 @@ export default function AgentWorkspacePage() {
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              YoursBuddy AI runs in multi-user mode. Anyone on the team can connect their own Windows computer to control their local Google Chrome browser from the cloud without exposing port 9222 publicly.
+              Jarvis AI runs in multi-user mode. Anyone on the team can connect their own Windows computer to control their local Google Chrome browser from the cloud without exposing port 9222 publicly.
             </p>
 
             <div className="space-y-3 text-xs">
@@ -594,7 +594,7 @@ export default function AgentWorkspacePage() {
                 }`}
               >
                 <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">
-                  {m.role === "user" ? "You" : "YoursBuddy AI"}
+                  {m.role === "user" ? "You" : "Jarvis AI"}
                 </div>
                 <div className="whitespace-pre-wrap">{m.content}</div>
                 {m.metadata_json?.download_url && (
@@ -743,7 +743,7 @@ export default function AgentWorkspacePage() {
                       <>
                         <p className="text-sm">No podcast leads discovered yet in this session.</p>
                         <p className="text-xs text-slate-500 mt-1">
-                          Click <strong className="text-cyan-400">Start Research</strong> or ask Jarvis above &mdash; YoursBuddy will continuously search LinkedIn &amp; YouTube, extract host emails, and populate this table in real time.
+                          Click <strong className="text-cyan-400">Start Research</strong> or ask Jarvis above &mdash; Jarvis will continuously search LinkedIn &amp; YouTube, extract host emails, and populate this table in real time.
                         </p>
                       </>
                     )}

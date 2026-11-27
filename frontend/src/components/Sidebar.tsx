@@ -32,11 +32,11 @@ export function Sidebar() {
       <div className="p-5 border-b border-slate-800">
         <div className="flex items-center gap-2.5">
           <div className="h-9 w-9 rounded-lg bg-cyan-500/15 border border-cyan-400/40 flex items-center justify-center text-cyan-300 font-bold">
-            YB
+            JV
           </div>
           <div>
-            <div className="text-sm font-semibold text-white tracking-tight">YoursBuddy AI</div>
-            <div className="text-[11px] text-slate-400">Jarvis Podcast Host Agent</div>
+            <div className="text-sm font-semibold text-white tracking-tight">Jarvis AI</div>
+            <div className="text-[11px] text-slate-400">Autonomous Research Agent</div>
           </div>
         </div>
       </div>

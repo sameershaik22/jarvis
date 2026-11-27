@@ -4,9 +4,9 @@ import { Sidebar } from "@/components/Sidebar";
 import { CompanyGate } from "@/components/CompanyGate";
 
 export const metadata: Metadata = {
-  title: "YoursBuddy AI — Podcast Host Research Agent",
+  title: "Jarvis AI — Autonomous Podcast Research Agent",
   description:
-    "Jarvis-like autonomous browser research agent for real estate podcast discovery, host research, verification, and Excel/CSV reporting.",
+    "Autonomous browser research agent for podcast discovery, host research, verification, and Excel/CSV reporting.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -180,7 +180,7 @@ export async function downloadExportFile(
   const disposition = res.headers.get("Content-Disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/i);
   const ext = format === "excel" ? "xlsx" : "csv";
-  const filename = match ? match[1] : `YoursBuddy_Podcast_Host_Research.${ext}`;
+  const filename = match ? match[1] : `Jarvis_Podcast_Host_Research.${ext}`;
   const recordCount = Number(res.headers.get("X-Export-Record-Count") || "0");
 
   const url = window.URL.createObjectURL(blob);

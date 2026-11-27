@@ -207,7 +207,7 @@ export default function SettingsPage() {
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Manage the dedicated browser sessions used by YoursBuddy AI. Completely isolated from your everyday Chrome profile.
+              Manage the dedicated browser sessions used by Jarvis AI. Completely isolated from your everyday Chrome profile.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">

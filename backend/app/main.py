@@ -36,9 +36,9 @@ async def lifespan(_app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="YoursBuddy AI — Podcast Host Research Agent",
+        title="Jarvis AI — Podcast Host Research Agent",
         version="1.0.0",
-        description="Jarvis-like autonomous browser research agent for real estate podcast discovery, host research, verification, and Excel/CSV reporting.",
+        description="Autonomous browser research agent for podcast discovery, host research, verification, and Excel/CSV reporting.",
         lifespan=lifespan,
     )
 

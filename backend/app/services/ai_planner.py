@@ -187,11 +187,11 @@ class AIPlanner:
         if any(phrase in lower for phrase in excluded_phrases):
             return {
                 "intent": "out_of_scope",
-                "summary": "This request includes functionality outside YoursBuddy AI v1 scope (strictly podcast discovery & podcast-host research, no guest prospecting or automated messaging).",
+                "summary": "This request includes functionality outside Jarvis AI v1 scope (strictly podcast discovery & podcast-host research, no guest prospecting or automated messaging).",
             }
 
         prompt = (
-            "You are the planning engine for YoursBuddy AI, an autonomous podcast-host research assistant. "
+            "You are the planning engine for Jarvis AI, an autonomous podcast-host research assistant. "
             "Extract the user's intent and specific target topic/role/niche. "
             "Return valid JSON with keys: "
             "intent (start_research | verify_host | check_youtube_email | show_research_summary | export_leads | pause_research | resume_research | stop_research | out_of_scope), "
@@ -219,7 +219,7 @@ class AIPlanner:
                         {
                             "role": "system",
                             "content": (
-                                "You are the planning engine for YoursBuddy AI. "
+                                "You are the planning engine for Jarvis AI. "
                                 "Classify command into JSON with intent, keyword, max_posts, target_name, summary."
                             ),
                         },

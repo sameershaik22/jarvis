@@ -70,16 +70,16 @@ export function CompanyGate({ children }: CompanyGateProps) {
       <div className="w-full max-w-md rounded-2xl border border-cyan-500/30 bg-slate-900/95 p-8 shadow-2xl shadow-cyan-950/50 text-slate-100">
         <div className="flex items-center space-x-3 mb-6">
           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-cyan-500/20">
-            YB
+            JV
           </div>
           <div>
-            <h2 className="text-xl font-bold tracking-tight text-white">YoursBuddy AI Workspace</h2>
+            <h2 className="text-xl font-bold tracking-tight text-white">Jarvis AI Workspace</h2>
             <p className="text-xs text-slate-400">Company-Wide Internal Cloud Agent</p>
           </div>
         </div>
 
         <p className="text-sm text-slate-300 mb-6 leading-relaxed">
-          Welcome to the shared YoursBuddy AI research engine. Enter your company access key to access shared leads, live research, and exports.
+          Welcome to the shared Jarvis AI research engine. Enter your company access key to access shared leads, live research, and exports.
         </p>
 
         <form onSubmit={handleUnlock} className="space-y-4">

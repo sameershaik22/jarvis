@@ -24,7 +24,7 @@ async def handle_jarvis_command(db: Session, command: str, agency_id: str = "def
     if intent == "out_of_scope":
         reply = (
             "I cannot run guest prospecting, marketing employee discovery, or automated cold messaging. "
-            "YoursBuddy AI v1 is strictly scoped to real estate podcast discovery, host identification, "
+            "Jarvis AI v1 is strictly scoped to podcast discovery, host identification, "
             "host company research, host contact discovery, and Excel/CSV reporting."
         )
         db.add(AgentMessage(agency_id=agency_id, role="assistant", content=reply, metadata_json={"intent": intent}))
@@ -110,9 +110,9 @@ async def handle_jarvis_command(db: Session, command: str, agency_id: str = "def
 
     if intent == "conversational_help":
         reply = (
-            "Hello! I am YoursBuddy AI, your autonomous real estate podcast host research agent. "
+            "Hello! I am Jarvis AI, your autonomous podcast host research agent. "
             "To begin research, click 'Start Research' above or send an instruction like: "
-            "'Find real estate podcasts on LinkedIn and YouTube, identify hosts, and locate business emails'."
+            "'Find podcasts on LinkedIn and YouTube, identify hosts, and locate business emails'."
         )
         db.add(AgentMessage(agency_id=agency_id, role="assistant", content=reply, metadata_json={"intent": intent}))
         db.commit()
